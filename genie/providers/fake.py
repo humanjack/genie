@@ -9,9 +9,40 @@ testable".
 
 from __future__ import annotations
 
+import json
 from collections.abc import AsyncIterator
 
 from genie.providers.base import ChatChunk, ChatMessage, ProviderClient
+
+
+def _tool_call_fragments(
+    index: int, call_id: str, name: str, args: dict, *, arg_chunks: int = 2
+) -> list[ChatChunk]:
+    """Build streamed fragments for one tool call at slot ``index``.
+
+    The opening fragment carries ``id`` and ``name``; ``arguments`` are split
+    into ``arg_chunks`` partial-JSON ``arguments_delta`` pieces — exactly the
+    shape a real provider streams (id/name once, args as string fragments).
+    """
+    arg_json = json.dumps(args)
+    n = max(1, arg_chunks)
+    size = max(1, -(-len(arg_json) // n))
+    pieces = [arg_json[i : i + size] for i in range(0, len(arg_json), size)] or [""]
+    fragments = [
+        ChatChunk(
+            tool_call_delta={
+                "index": index,
+                "id": call_id,
+                "name": name,
+                "arguments_delta": pieces[0],
+            }
+        )
+    ]
+    fragments += [
+        ChatChunk(tool_call_delta={"index": index, "arguments_delta": piece})
+        for piece in pieces[1:]
+    ]
+    return fragments
 
 
 class FakeProvider(ProviderClient):
@@ -105,18 +136,27 @@ class FakeProvider(ProviderClient):
         return max(1, chars // 4)
 
     @classmethod
-    def from_text(cls, text: str, *, model: str = "fake-1", chunks: int = 3) -> FakeProvider:
+    def from_text(
+        cls,
+        text: str,
+        *,
+        model: str = "fake-1",
+        chunks: int = 3,
+        usage: dict | None = None,
+    ) -> FakeProvider:
         """Build a single-turn provider that streams ``text`` then stops.
 
         The text is split into roughly ``chunks`` ``delta_text`` pieces,
         followed by a terminal chunk with ``finish_reason="stop"``. The
-        concatenated ``delta_text`` of the streamed chunks equals ``text``.
+        concatenated ``delta_text`` of the streamed chunks equals ``text``. When
+        ``usage`` is given it rides the terminal chunk, so cost/ledger paths can
+        be exercised.
         """
         n = max(1, chunks)
         size = max(1, -(-len(text) // n))
         pieces = [text[i : i + size] for i in range(0, len(text), size)] or [""]
         turn = [ChatChunk(delta_text=p) for p in pieces]
-        turn.append(ChatChunk(finish_reason="stop"))
+        turn.append(ChatChunk(finish_reason="stop", usage=usage))
         return cls([turn], model=model)
 
     @classmethod
@@ -127,15 +167,37 @@ class FakeProvider(ProviderClient):
         *,
         call_id: str = "call_1",
         model: str = "fake-1",
+        usage: dict | None = None,
     ) -> FakeProvider:
-        """Build a single-turn provider that emits one tool call then stops.
+        """Build a single-turn provider that streams one tool call then stops.
 
-        The turn yields a chunk carrying a ``tool_call_delta`` of the form
-        ``{"id", "name", "arguments"}`` followed by a chunk with
-        ``finish_reason="tool_calls"``.
+        The arguments are streamed as partial-JSON ``arguments_delta`` fragments
+        at slot ``index=0`` (id/name on the first fragment), exactly as a real
+        provider streams them, followed by a chunk with
+        ``finish_reason="tool_calls"`` carrying optional ``usage``.
         """
-        turn = [
-            ChatChunk(tool_call_delta={"id": call_id, "name": name, "arguments": args}),
-            ChatChunk(finish_reason="tool_calls"),
-        ]
+        return cls.with_tool_calls([(name, args)], call_ids=[call_id], model=model, usage=usage)
+
+    @classmethod
+    def with_tool_calls(
+        cls,
+        calls: list[tuple[str, dict]],
+        *,
+        call_ids: list[str] | None = None,
+        model: str = "fake-1",
+        usage: dict | None = None,
+    ) -> FakeProvider:
+        """Build a single-turn provider that streams *parallel* tool calls.
+
+        Each ``(name, args)`` in ``calls`` is assigned a distinct slot
+        ``index`` and its fragments are emitted in order; this is the fixture
+        that exercises the loop's parallel tool-call dispatch (SPEC §5.3). A
+        terminal ``finish_reason="tool_calls"`` chunk (with optional ``usage``)
+        closes the turn.
+        """
+        ids = call_ids or [f"call_{i + 1}" for i in range(len(calls))]
+        turn: list[ChatChunk] = []
+        for index, ((name, args), call_id) in enumerate(zip(calls, ids, strict=True)):
+            turn += _tool_call_fragments(index, call_id, name, args)
+        turn.append(ChatChunk(finish_reason="tool_calls", usage=usage))
         return cls([turn], model=model)

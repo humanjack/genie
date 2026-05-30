@@ -44,11 +44,29 @@ class ChatChunk:
 
     Attributes:
         delta_text: Newly produced text, if any.
-        tool_call_delta: A partial or complete tool-call fragment, if any.
+        tool_call_delta: One increment of a *single* tool call, addressed by an
+            integer slot ``index`` so fragments of several parallel tool calls
+            can be interleaved and reassembled. This mirrors both OpenAI
+            (``ChoiceDeltaToolCall.index`` + streamed ``function.arguments``
+            string) and Anthropic (``content_block`` index + ``input_json_delta``
+            ``partial_json`` string). Shape::
+
+                {
+                    "index": int,                 # required — which tool-call slot
+                    "id": str | None,             # set once, on the slot's first fragment
+                    "name": str | None,           # set once, on the slot's first fragment
+                    "arguments_delta": str | None # partial JSON to append for this slot
+                }
+
+            The consumer accumulates ``arguments_delta`` per ``index`` and
+            ``json.loads`` the joined string when the turn finishes. Arguments
+            are **never** delivered as a pre-parsed dict — that would not
+            survive real streaming.
         finish_reason: Terminal reason for the turn (e.g. ``"stop"``,
             ``"tool_calls"``), set on the final chunk of a turn.
         usage: Token accounting for the turn with keys ``input_tokens``,
-            ``output_tokens``, ``cache_read``, ``cache_write``.
+            ``output_tokens``, ``cache_read``, ``cache_write``. Delivered on the
+            turn's terminal chunk.
     """
 
     delta_text: str | None = None
