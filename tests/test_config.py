@@ -135,14 +135,24 @@ def test_provider_parts_keeps_later_colons_in_model():
     assert settings.provider_parts() == ("openai", "org:weird:model")
 
 
-@pytest.mark.parametrize("bad", ["anthropic", "", ":model", "provider:"])
+@pytest.mark.parametrize(
+    "bad", ["anthropic", "", ":model", "provider:", " : ", "anthropic: ", " :model"]
+)
 def test_provider_parts_raises_on_malformed(bad: str):
-    """Malformed provider.default raises a clear ValueError."""
+    """Malformed provider.default (incl. whitespace-only sides) raises a clear ValueError."""
     settings = Settings()
     settings.provider.default = bad
 
     with pytest.raises(ValueError, match="provider:model"):
         settings.provider_parts()
+
+
+def test_provider_parts_strips_surrounding_whitespace():
+    """Whitespace around the provider/model is trimmed, not preserved."""
+    settings = Settings()
+    settings.provider.default = "  anthropic : claude-sonnet-4-6  "
+
+    assert settings.provider_parts() == ("anthropic", "claude-sonnet-4-6")
 
 
 def test_resolve_api_key_returns_value_when_present():
@@ -158,6 +168,14 @@ def test_resolve_api_key_returns_none_when_absent():
     settings = Settings()
 
     assert settings.resolve_api_key("openai", {}) is None
+
+
+def test_resolve_api_key_returns_none_for_empty_string():
+    """An env var set to an empty string counts as absent (None)."""
+    settings = Settings()
+    env = {"ANTHROPIC_API_KEY": ""}
+
+    assert settings.resolve_api_key("anthropic", env) is None
 
 
 def test_resolve_api_key_honors_custom_env_var_name(tmp_path: Path):

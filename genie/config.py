@@ -132,11 +132,13 @@ class Settings(BaseModel):
     def provider_parts(self) -> tuple[str, str]:
         """Split ``provider.default`` into ``(provider_name, model)``.
 
-        Splits on the first ``:``. Raises :class:`ValueError` if the value has
-        no colon or an empty side.
+        Splits on the first ``:``. Surrounding whitespace on either side is
+        stripped. Raises :class:`ValueError` if the value has no colon or an
+        empty/whitespace-only side.
         """
         default = self.provider.default
         name, sep, model = default.partition(":")
+        name, model = name.strip(), model.strip()
         if not sep or not name or not model:
             raise ValueError(f"provider.default must be 'provider:model', got {default!r}")
         return name, model
@@ -145,10 +147,11 @@ class Settings(BaseModel):
         """Return the API key for ``provider_name`` from ``env``, or ``None``.
 
         Looks up the provider's configured ``api_key_env`` variable name in the
-        supplied environment mapping. A missing entry returns ``None`` so the
-        caller decides whether that is fatal; see :meth:`require_api_key`.
+        supplied environment mapping. A missing entry — or one set to an empty
+        string — returns ``None`` so the caller decides whether that is fatal;
+        see :meth:`require_api_key`.
         """
-        return env.get(self._api_key_env(provider_name))
+        return env.get(self._api_key_env(provider_name)) or None
 
     def require_api_key(self, provider_name: str, env: Mapping[str, str]) -> str:
         """Like :meth:`resolve_api_key` but raise if the key is absent.
