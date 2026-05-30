@@ -1,0 +1,39 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+build/
+dist/
+.eggs/
+
+# Virtualenvs
+.venv/
+venv/
+env/
+
+# Caches
+.pytest_cache/
+.ruff_cache/
+.pyright/
+.mypy_cache/
+.coverage
+.coverage.*
+htmlcov/
+coverage.xml
+
+# OS
+.DS_Store
+
+# Editor
+.idea/
+.vscode/
+
+# Genie runtime (global state lives in $HOME/.genie, outside the repo;
+# this catches any repo-local runtime dir)
+.genie/
+.genie-local/
+
+# Secrets
+.env
+.env.*
+!.env.example
