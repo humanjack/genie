@@ -1,0 +1,38 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+build/
+dist/
+.eggs/
+
+# Virtualenvs
+.venv/
+venv/
+env/
+
+# Caches
+.pytest_cache/
+.ruff_cache/
+.pyright/
+.mypy_cache/
+.coverage
+.coverage.*
+htmlcov/
+coverage.xml
+
+# OS
+.DS_Store
+
+# Editor
+.idea/
+.vscode/
+
+# Genie runtime
+~/.genie/
+.genie-local/
+
+# Secrets
+.env
+.env.*
+!.env.example
