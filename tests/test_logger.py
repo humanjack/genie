@@ -71,6 +71,54 @@ def test_redact_secrets_leaves_non_secrets_intact() -> None:
     assert result == event_dict
 
 
+@pytest.mark.parametrize(
+    "key",
+    ["x-api-key", "X-API-Key", "auth_token", "access_token", "client_secret", "set-cookie"],
+)
+def test_redact_secrets_matches_affixed_and_hyphenated_keys(key: str) -> None:
+    """Affixed/hyphenated header-style keys are redacted, not just exact names."""
+    result = _redact_secrets(None, "info", {"event": "call", key: "leak-me"})
+    assert result[key] == "***", f"{key!r} leaked"
+
+
+def test_redact_secrets_recurses_into_nested_dicts() -> None:
+    """Secrets nested inside dict values are redacted."""
+    event_dict = {"event": "call", "config": {"api_key": "leak", "host": "api.x.com"}}
+    result = _redact_secrets(None, "info", event_dict)
+    assert result["config"]["api_key"] == "***"
+    assert result["config"]["host"] == "api.x.com"
+
+
+def test_redact_secrets_recurses_into_lists_of_dicts() -> None:
+    """Secrets nested inside lists/tuples of dicts are redacted."""
+    event_dict = {"event": "call", "items": [{"password": "leak"}, {"ok": 1}]}
+    result = _redact_secrets(None, "info", event_dict)
+    assert result["items"][0]["password"] == "***"
+    assert result["items"][1]["ok"] == 1
+
+
+@pytest.mark.parametrize("key", ["input_tokens", "output_tokens", "total_tokens", "tokenizer"])
+def test_redact_secrets_preserves_token_count_telemetry(key: str) -> None:
+    """Cost telemetry keys that merely *contain* 'token' must NOT be redacted."""
+    result = _redact_secrets(None, "info", {"event": "usage", key: 1234})
+    assert result[key] == 1234, f"{key!r} was wrongly redacted — breaks cost observability"
+
+
+def test_configure_logging_does_not_stack_processors() -> None:
+    """Repeated configure_logging keeps a stable processor-chain length (idempotent)."""
+    configure_logging()
+    first = len(structlog.get_config()["processors"])
+    configure_logging()
+    configure_logging()
+    assert len(structlog.get_config()["processors"]) == first
+
+
+def test_configure_logging_rejects_invalid_level() -> None:
+    """An unknown level name raises a clear ValueError listing valid levels."""
+    with pytest.raises(ValueError, match="invalid log level"):
+        configure_logging(level="VERBOSE")
+
+
 def test_configure_logging_default_is_idempotent() -> None:
     """Default console configuration runs and can be called twice safely."""
     configure_logging()
