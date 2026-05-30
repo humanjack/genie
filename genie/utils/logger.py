@@ -83,10 +83,7 @@ def _is_secret_key(key: str) -> bool:
     parts = [p for p in _SEPARATORS.split(low) if p]
     if any(p in SECRET_KEYS for p in parts):
         return True
-    for a, b in pairwise(parts):
-        if f"{a}{b}" in SECRET_KEYS or f"{a}_{b}" in SECRET_KEYS:
-            return True
-    return False
+    return any(f"{a}{b}" in SECRET_KEYS or f"{a}_{b}" in SECRET_KEYS for a, b in pairwise(parts))
 
 
 def _redact_value(value: object) -> object:
