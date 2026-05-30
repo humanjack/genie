@@ -28,8 +28,9 @@ coverage.xml
 .idea/
 .vscode/
 
-# Genie runtime
-~/.genie/
+# Genie runtime (global state lives in $HOME/.genie, outside the repo;
+# this catches any repo-local runtime dir)
+.genie/
 .genie-local/
 
 # Secrets
