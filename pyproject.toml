@@ -63,6 +63,8 @@ ignore = ["E501"]
 
 [tool.pyright]
 include = ["genie", "tests"]
+venvPath = "."
+venv = ".venv"
 pythonVersion = "3.11"
 typeCheckingMode = "basic"
 reportMissingImports = true
