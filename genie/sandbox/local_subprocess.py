@@ -201,5 +201,6 @@ class LocalSubprocessBackend(SandboxBackend):
         # able to block exec() past the timeout (see DRAIN_TIMEOUT).
         try:
             return await asyncio.wait_for(proc.communicate(), timeout=DRAIN_TIMEOUT)
-        except Exception:  # noqa: BLE001 — drain is best-effort; never block exec()
+        except Exception:
+            # Drain is best-effort: never let a stuck child block exec().
             return b"", b""
