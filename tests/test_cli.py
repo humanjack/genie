@@ -202,13 +202,35 @@ def test_main_unknown_command_returns_two(capsys):
     assert "unknown" in captured.err
 
 
-def test_main_code_is_placeholder(capsys):
-    """The ``code`` subcommand stays a Phase 1 placeholder, returning 0."""
-    rc = main(["code"])
+def test_main_code_runs_a_session(capsys, monkeypatch, tmp_path):
+    """`genie code <path>` opens a real session: streams a reply, exits 0 on EOF."""
+    monkeypatch.setattr(
+        cli, "provider_factory", lambda *a, **k: FakeProvider.from_text("hi from code")
+    )
+    # Drive the REPL with one line then EOF, without a real terminal.
+    lines = iter(["hello", None])
+    monkeypatch.setattr(cli, "_READ_INPUT", lambda: next(lines))
+
+    rc = main(["code", str(tmp_path), "--model", "fake:fake-1"])
 
     captured = capsys.readouterr()
     assert rc == 0
-    assert "Phase 1" in captured.err
+    assert "hi from code" in captured.out
+
+
+def test_main_code_reports_errors_without_traceback(capsys, monkeypatch, tmp_path):
+    """A provider/build error in `code` surfaces as one clean line, rc != 0."""
+
+    def _boom(*a, **k):
+        raise ValueError("bad model spec")
+
+    monkeypatch.setattr(cli, "provider_factory", _boom)
+    rc = main(["code", str(tmp_path), "--model", "fake:fake-1"])
+
+    captured = capsys.readouterr()
+    assert rc == 1
+    assert "genie:" in captured.err
+    assert "Traceback" not in captured.err
 
 
 @pytest.mark.skipif(
