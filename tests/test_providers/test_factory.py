@@ -41,9 +41,12 @@ def test_unknown_provider_lists_supported() -> None:
     assert "fake" in msg
 
 
-def test_anthropic_not_yet_available() -> None:
-    with pytest.raises(RuntimeError, match="anthropic provider not yet available"):
-        provider_factory("anthropic:claude-sonnet-4-6")
+def test_anthropic_factory_builds_client() -> None:
+    from genie.providers.anthropic_client import AnthropicClient
+
+    provider = provider_factory("anthropic:claude-sonnet-4-6", client=object())
+    assert isinstance(provider, AnthropicClient)
+    assert provider.model == "claude-sonnet-4-6"
 
 
 def test_openai_not_yet_available() -> None:
