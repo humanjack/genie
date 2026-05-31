@@ -236,6 +236,32 @@ def test_translate_messages_system_and_tool_result() -> None:
     assert out[3] == {"role": "tool", "content": "done", "tool_call_id": "c1"}
 
 
+def test_translate_messages_maps_neutral_tool_calls_to_native() -> None:
+    """The loop appends NEUTRAL tool_calls; the adapter must produce OpenAI-native.
+
+    Regression for #63: passing the neutral shape through verbatim made
+    multi-turn tool conversations 400 on the 2nd OpenAI call.
+    """
+    # This mirrors exactly what genie.loop appends after one tool round-trip.
+    messages = [
+        ChatMessage(role="user", content="read a.txt"),
+        ChatMessage(
+            role="assistant",
+            content="",
+            tool_calls=[{"id": "call_1", "name": "read_file", "arguments": {"path": "a.txt"}}],
+        ),
+        ChatMessage(role="tool", content="contents", tool_call_id="call_1"),
+    ]
+    out = _translate_messages(messages, system=None)
+
+    tc = out[1]["tool_calls"][0]
+    assert tc["type"] == "function"
+    assert tc["function"]["name"] == "read_file"
+    # arguments must be a JSON-encoded STRING, not a dict.
+    assert tc["function"]["arguments"] == '{"path": "a.txt"}'
+    assert out[2] == {"role": "tool", "content": "contents", "tool_call_id": "call_1"}
+
+
 async def test_stream_passes_tools_and_stream_options() -> None:
     client, fake = _make_client([_finish_chunk("stop")])
     await collect(

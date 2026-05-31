@@ -16,6 +16,7 @@ usage is emitted on its own terminal :class:`ChatChunk` when it lands.
 
 from __future__ import annotations
 
+import json
 import os
 from collections.abc import AsyncIterator
 from typing import TYPE_CHECKING, Any
@@ -46,12 +47,33 @@ def _translate_tools(tools: list[dict]) -> list[dict] | None:
     return wrapped
 
 
+def _translate_tool_call(call: dict) -> dict:
+    """Map one neutral tool-call to OpenAI's native function-call shape.
+
+    The neutral shape (what the loop appends to history) is
+    ``{"id", "name", "arguments": <dict>}``; OpenAI requires
+    ``{"id", "type": "function", "function": {"name", "arguments": <JSON string>}}``
+    with the arguments JSON-*encoded*. Already-native calls (carrying a
+    ``"function"`` key) are passed through unchanged for robustness.
+    """
+    if "function" in call:
+        return call
+    arguments = call.get("arguments", {})
+    arguments_str = arguments if isinstance(arguments, str) else json.dumps(arguments)
+    return {
+        "id": call.get("id"),
+        "type": "function",
+        "function": {"name": call.get("name"), "arguments": arguments_str},
+    }
+
+
 def _translate_messages(messages: list[ChatMessage], system: str | None) -> list[dict]:
     """Translate neutral messages to OpenAI chat-completions message dicts.
 
     ``system`` (which chat completions has no top-level slot for) becomes a
     leading ``{"role": "system"}`` message. Assistant ``tool_calls`` are mapped
-    to OpenAI's ``tool_calls`` array, and ``role == "tool"`` results carry their
+    from the neutral shape to OpenAI's native function-call array (see
+    :func:`_translate_tool_call`), and ``role == "tool"`` results carry their
     ``tool_call_id`` so the model can correlate the answer to the request.
     """
     out: list[dict] = []
@@ -69,7 +91,7 @@ def _translate_messages(messages: list[ChatMessage], system: str | None) -> list
             continue
         entry: dict[str, Any] = {"role": msg.role, "content": msg.content}
         if msg.tool_calls:
-            entry["tool_calls"] = msg.tool_calls
+            entry["tool_calls"] = [_translate_tool_call(c) for c in msg.tool_calls]
         out.append(entry)
     return out
 
