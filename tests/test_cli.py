@@ -128,6 +128,62 @@ def test_main_chat_once_missing_api_key(capsys, monkeypatch):
     assert "Traceback" not in captured.err
 
 
+def test_main_chat_once_sdk_runtime_error_no_traceback(capsys, monkeypatch):
+    """A provider-SDK runtime error (auth/network, a plain Exception) is clean, rc != 0.
+
+    Real anthropic/openai errors subclass APIError (i.e. Exception), not
+    ValueError/RuntimeError — they must still surface as one line, never a trace.
+    """
+
+    class _AuthError(Exception):
+        """Stand-in for anthropic.AuthenticationError / a 401 from the SDK."""
+
+    class _FailingProvider(ProviderClient):
+        name = "anthropic"
+        model = "claude-sonnet-4-6"
+
+        async def stream(self, messages, tools, **kwargs) -> AsyncIterator[ChatChunk]:
+            raise _AuthError("invalid x-api-key (401)")
+            yield ChatChunk()  # pragma: no cover
+
+        def count_tokens(self, messages) -> int:  # pragma: no cover
+            return 0
+
+    monkeypatch.setattr(cli, "provider_factory", lambda *a, **k: _FailingProvider())
+
+    rc = main(["chat-once", "hi", "--model", "anthropic:claude-sonnet-4-6"])
+
+    captured = capsys.readouterr()
+    assert rc == 1
+    assert "genie:" in captured.err
+    assert "401" in captured.err
+    assert "Traceback" not in captured.err
+
+
+def test_main_chat_once_keyboard_interrupt_is_clean(capsys, monkeypatch):
+    """Ctrl-C mid-stream exits 130 with no traceback."""
+
+    class _InterruptingProvider(ProviderClient):
+        name = "fake"
+        model = "fake-1"
+
+        async def stream(self, messages, tools, **kwargs) -> AsyncIterator[ChatChunk]:
+            raise KeyboardInterrupt
+            yield ChatChunk()  # pragma: no cover
+
+        def count_tokens(self, messages) -> int:  # pragma: no cover
+            return 0
+
+    monkeypatch.setattr(cli, "provider_factory", lambda *a, **k: _InterruptingProvider())
+
+    rc = main(["chat-once", "hi", "--model", "fake:fake-1"])
+
+    captured = capsys.readouterr()
+    assert rc == 130
+    assert "interrupted" in captured.err
+    assert "Traceback" not in captured.err
+
+
 def test_main_help_returns_zero(capsys):
     """No args / --help preserves the Phase 0 smoke behavior."""
     assert main([]) == 0

@@ -110,8 +110,16 @@ def _cmd_chat_once(args: argparse.Namespace) -> int:
                 max_tokens=args.max_tokens,
             )
         )
-    except (ValueError, RuntimeError) as exc:
-        log.error("chat_once_failed", error=str(exc))
+    except KeyboardInterrupt:
+        # User aborted mid-stream; exit quietly without a traceback (130 = SIGINT).
+        print("\ngenie: interrupted", file=sys.stderr)
+        return 130
+    except Exception as exc:
+        # Boundary catch-all: config/spec errors (ValueError/RuntimeError) AND
+        # provider-SDK runtime errors (auth, network, rate-limit — subclasses of
+        # the SDKs' APIError, i.e. plain Exception) must surface as one clean
+        # line, never a traceback. The error is logged with its type for triage.
+        log.error("chat_once_failed", error=str(exc), error_type=type(exc).__name__)
         print(f"genie: {exc}", file=sys.stderr)
         return 1
     return 0
