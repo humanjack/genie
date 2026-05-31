@@ -90,7 +90,7 @@ def test_get_unknown_on_empty_registry_mentions_none() -> None:
         registry.get("nope")
 
 
-def test_specs_for_anthropic_shape() -> None:
+def test_specs_for_returns_neutral_shape() -> None:
     registry = _registry(read_file)
     specs = registry.specs_for("anthropic")
     assert specs == [
@@ -102,22 +102,32 @@ def test_specs_for_anthropic_shape() -> None:
     ]
 
 
-def test_specs_for_openai_wraps_function_with_parameters() -> None:
+def test_specs_for_is_neutral_for_every_provider() -> None:
+    """All providers get the same neutral spec — adapters translate internally."""
     registry = _registry(read_file)
-    specs = registry.specs_for("openai")
-    assert len(specs) == 1
-    spec = specs[0]
-    assert spec["type"] == "function"
-    function = spec["function"]
-    assert function["name"] == "read_file"
-    assert function["description"] == "Read a file."
-    # The crux of the OpenAI translation: parameters IS the input_schema.
-    assert function["parameters"] == read_file.input_schema
-
-
-def test_specs_for_fake_uses_anthropic_passthrough() -> None:
-    registry = _registry(read_file)
+    assert registry.specs_for("openai") == registry.specs_for("anthropic")
     assert registry.specs_for("fake") == registry.specs_for("anthropic")
+
+
+def test_specs_for_output_is_consumed_by_real_adapters() -> None:
+    """Contract test: specs_for output must feed each adapter's translator cleanly.
+
+    Guards the double-translation bug — the loop passes specs_for() straight to
+    provider.stream(tools=...), so it must match what each adapter expects.
+    """
+    from genie.providers.openai_client import _translate_tools
+
+    registry = _registry(read_file, echo)
+    specs = registry.specs_for("openai")
+
+    # OpenAI adapter re-shapes the neutral spec into function tools without error.
+    wrapped = _translate_tools(specs)
+    assert wrapped is not None
+    assert wrapped[0]["type"] == "function"
+    assert wrapped[0]["function"]["name"] == "read_file"
+    assert wrapped[0]["function"]["parameters"] == read_file.input_schema
+    # Anthropic consumes the neutral shape as-is (its native shape).
+    assert registry.specs_for("anthropic")[0]["input_schema"] == read_file.input_schema
 
 
 def test_specs_for_preserves_registration_order() -> None:

@@ -4,15 +4,21 @@ A :class:`ToolRegistry` is the loop's single source of truth for the tools a
 model may call. It does three things and nothing more:
 
 1. **Holds** tools by name (registration is the only mutation).
-2. **Translates** the held tools into each provider's native tool shape via
+2. **Exposes** the held tools as provider-neutral specs via
    :meth:`ToolRegistry.specs_for` — the loop hands the result straight to
    ``provider.stream(..., tools=...)``.
 3. **Dispatches** a single named call via :meth:`ToolRegistry.call`, awaiting
    the tool's handler and applying *layer 1* truncation (SPEC §5.4) to the
    result.
 
-Provider translation lives in a small per-provider mapping (:data:`_TRANSLATORS`)
-so adding a provider is one entry — the extension seam the SPEC asks for.
+**Where translation lives.** Each provider adapter translates the neutral spec
+into its own wire format *inside* ``stream`` (Anthropic passes the neutral shape
+through unchanged; OpenAI wraps it as a ``function`` tool — see
+``genie/providers/*_client.py``). So :meth:`specs_for` returns the
+lowest-common-denominator ``{name, description, input_schema}`` shape for **every**
+provider; pre-wrapping here would double-translate and corrupt the spec. The
+per-provider mapping (:data:`_TRANSLATORS`) is kept as the seam for a future
+provider that genuinely needs registry-side shaping.
 
 **Error contract.** :meth:`call` catches any ``Exception`` raised by a handler
 and returns ``ToolResult.error(str(exc))`` rather than propagating. The loop's
@@ -31,8 +37,12 @@ from genie.tools.base import Tool
 from genie.tools.result import ToolResult
 
 
-def _spec_anthropic(tool: Tool) -> dict:
-    """Anthropic tool shape: ``{name, description, input_schema}`` (passthrough)."""
+def _spec_neutral(tool: Tool) -> dict:
+    """The provider-neutral tool spec: ``{name, description, input_schema}``.
+
+    This is the lowest common denominator the loop passes to ``stream`` for any
+    provider; each adapter shapes it to its own wire format internally.
+    """
     return {
         "name": tool.name,
         "description": tool.description,
@@ -40,25 +50,14 @@ def _spec_anthropic(tool: Tool) -> dict:
     }
 
 
-def _spec_openai(tool: Tool) -> dict:
-    """OpenAI tool shape: a ``function`` wrapper whose ``parameters`` is the schema."""
-    return {
-        "type": "function",
-        "function": {
-            "name": tool.name,
-            "description": tool.description,
-            "parameters": tool.input_schema,
-        },
-    }
-
-
-# The extension seam: one entry per provider. ``fake`` reuses the Anthropic-style
-# passthrough — it is the simplest shape and the FakeProvider does not inspect
-# tool structure, so the lowest-common-denominator form is the right default.
+# The extension seam: one entry per provider. Every provider currently uses the
+# neutral spec because the adapters own wire-format translation in ``stream``
+# (pre-wrapping here would double-translate). A future provider needing
+# registry-side shaping adds its own translator entry.
 _TRANSLATORS: dict[str, Callable[[Tool], dict]] = {
-    "anthropic": _spec_anthropic,
-    "openai": _spec_openai,
-    "fake": _spec_anthropic,
+    "anthropic": _spec_neutral,
+    "openai": _spec_neutral,
+    "fake": _spec_neutral,
 }
 
 
@@ -135,24 +134,21 @@ class ToolRegistry:
         return len(self._tools)
 
     def specs_for(self, provider_name: str) -> list[dict]:
-        """Translate every registered tool to ``provider_name``'s native shape.
+        """Return the neutral tool specs to pass to ``provider_name``'s ``stream``.
 
-        The result is ready to pass as the ``tools`` argument to that provider's
-        :meth:`~genie.providers.base.ProviderClient.stream`. Order follows
-        registration order.
-
-        Supported providers and their shapes:
-
-        - ``"anthropic"`` → ``{"name", "description", "input_schema"}`` (passthrough).
-        - ``"openai"`` → ``{"type": "function", "function": {"name", "description",
-          "parameters"}}`` where ``parameters`` is the tool's ``input_schema``.
-        - ``"fake"`` → the Anthropic-style passthrough (simplest shape).
+        The result is ready to hand straight to that provider's
+        :meth:`~genie.providers.base.ProviderClient.stream` as ``tools=``; the
+        adapter shapes it to its own wire format internally (so the same neutral
+        ``{name, description, input_schema}`` list is returned for every
+        supported provider — see the module docstring on why pre-wrapping here
+        would double-translate). Order follows registration order.
 
         Args:
-            provider_name: The provider whose tool shape to produce.
+            provider_name: The provider the specs are destined for. Validated
+                against the supported set; currently does not change the shape.
 
         Returns:
-            A list of provider-native tool ``dict`` objects, one per tool.
+            A list of neutral tool ``dict`` objects, one per tool.
 
         Raises:
             ValueError: If ``provider_name`` is not a supported provider; the
