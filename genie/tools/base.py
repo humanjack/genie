@@ -17,7 +17,7 @@ from __future__ import annotations
 import functools
 import inspect
 from collections.abc import Awaitable, Callable, Sequence
-from typing import Any
+from typing import Any, get_type_hints
 
 from pydantic import BaseModel, ConfigDict, create_model
 
@@ -112,9 +112,14 @@ def tool(
         @functools.wraps(func)
         async def handler(**kwargs: Any) -> ToolResult:
             result = await func(**kwargs)
+            if isinstance(result, ToolResult):
+                return result
             if isinstance(result, str):
                 return ToolResult.text(result)
-            return result
+            raise TypeError(
+                f"tool {resolved_name!r} handler must return ToolResult or str, "
+                f"got {type(result).__name__}"
+            )
 
         return Tool(
             name=resolved_name,
@@ -142,18 +147,33 @@ def _schema_from_signature(func: Callable[..., Any], tool_name: str) -> dict:
         removed.
 
     Raises:
-        TypeError: If any parameter lacks a type annotation.
+        TypeError: If any parameter lacks a type annotation, uses ``*args`` /
+            ``**kwargs``, or has an annotation that cannot be resolved.
     """
     signature = inspect.signature(func)
+    # Resolve stringized annotations (PEP 563 / ``from __future__ import
+    # annotations``) to real types so unions like ``int | None`` build a valid
+    # schema instead of crashing create_model on an unresolved forward ref.
+    try:
+        hints = get_type_hints(func)
+    except Exception as exc:  # noqa: BLE001 — surface any resolution failure clearly
+        raise TypeError(f"@tool could not resolve type hints for {tool_name!r}: {exc}") from exc
+    hints.pop("return", None)
+
     fields: dict[str, Any] = {}
     for param_name, param in signature.parameters.items():
-        if param.annotation is inspect.Parameter.empty:
+        if param.kind in (inspect.Parameter.VAR_POSITIONAL, inspect.Parameter.VAR_KEYWORD):
+            raise TypeError(
+                f"@tool does not support *args/**kwargs; parameter {param_name!r} on "
+                f"{tool_name!r} must be an explicit named parameter"
+            )
+        if param_name not in hints:
             raise TypeError(
                 f"@tool parameter {param_name!r} on {tool_name!r} lacks a type annotation; "
                 "annotate every parameter explicitly"
             )
         default = ... if param.default is inspect.Parameter.empty else param.default
-        fields[param_name] = (param.annotation, default)
+        fields[param_name] = (hints[param_name], default)
 
     args_model = create_model(f"{tool_name}_Args", **fields)
     schema = args_model.model_json_schema()

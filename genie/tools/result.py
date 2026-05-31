@@ -76,6 +76,9 @@ class ToolResult:
             ``self`` if under the cap, else a new truncated :class:`ToolResult`
             carrying the same ``is_error`` and a shallow copy of ``metadata``.
         """
+        # A non-positive budget keeps nothing; clamp so the marker count stays
+        # truthful and the result never grows larger than the original.
+        max_chars = max(0, max_chars)
         if len(self.content) <= max_chars:
             return self
 

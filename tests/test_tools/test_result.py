@@ -98,3 +98,18 @@ def test_truncate_odd_budget_splits_head_and_tail() -> None:
     head, _, tail = truncated.content.partition("\n")
     assert head == "aaa"
     assert tail.endswith("aaaa")
+
+
+def test_truncate_negative_budget_is_clamped_and_count_is_truthful() -> None:
+    """A negative budget must not keep content or lie about the elided count."""
+    content = "abcdef"  # 6 chars
+    truncated = ToolResult.text(content).truncate(-4)
+    # No original content survives, and the marker reports all 6 elided.
+    assert "abc" not in truncated.content
+    assert "truncated 6 chars" in truncated.content
+
+
+def test_truncate_zero_keeps_no_content() -> None:
+    truncated = ToolResult.text("abcdef").truncate(0)
+    # Only the marker remains — no original characters survive.
+    assert truncated.content == "\n…[truncated 6 chars]…\n"

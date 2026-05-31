@@ -17,6 +17,66 @@ def test_decorator_returns_tool_instance() -> None:
     assert isinstance(sample, Tool)
 
 
+def test_union_and_optional_params_resolve_under_future_annotations() -> None:
+    """PEP 563 stringized hints (this module uses them) must resolve, not crash.
+
+    Regression for the gate bug: every builtin tool uses ``X | None`` params.
+    """
+
+    @tool(name="rf")
+    async def read_file(
+        path: str, offset: int | None = None, tags: list[str] | None = None
+    ) -> ToolResult:
+        """Read a file."""
+        return ToolResult.text(path)
+
+    schema = read_file.input_schema
+    assert schema["required"] == ["path"]
+    assert "anyOf" in schema["properties"]["offset"]
+    assert {"type": "integer"} in schema["properties"]["offset"]["anyOf"]
+    assert schema["properties"]["tags"]["anyOf"][0] == {
+        "items": {"type": "string"},
+        "type": "array",
+    }
+
+
+def test_var_args_and_var_kwargs_are_rejected() -> None:
+    """*args / **kwargs would produce a malformed, type-less required property."""
+    with pytest.raises(TypeError, match=r"\*args/\*\*kwargs"):
+
+        @tool()
+        async def bad_args(*args: int) -> ToolResult:
+            """No good."""
+            return ToolResult.text("x")
+
+    with pytest.raises(TypeError, match=r"\*args/\*\*kwargs"):
+
+        @tool()
+        async def bad_kwargs(**kwargs: int) -> ToolResult:
+            """No good."""
+            return ToolResult.text("x")
+
+
+async def test_handler_rejects_non_toolresult_non_str_return() -> None:
+    """A handler returning the wrong type fails loudly at the wrapper, not downstream."""
+
+    @tool()
+    async def returns_int(x: str) -> ToolResult:
+        """Bad return."""
+        return 42  # type: ignore[return-value]
+
+    with pytest.raises(TypeError, match="must return ToolResult or str"):
+        await returns_int.handler(x="hi")
+
+    @tool()
+    async def returns_none(x: str) -> ToolResult:
+        """Bad return."""
+        return None  # type: ignore[return-value]
+
+    with pytest.raises(TypeError, match="must return ToolResult or str"):
+        await returns_none.handler(x="hi")
+
+
 def test_input_schema_is_object_with_properties_and_required() -> None:
     @tool()
     async def read_file(path: str, limit: int = 10) -> ToolResult:
