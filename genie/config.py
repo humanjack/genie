@@ -42,10 +42,16 @@ class AnthropicProviderConfig(ProviderProfile):
 
 
 class OpenAIProviderConfig(ProviderProfile):
-    """OpenAI provider profile."""
+    """OpenAI provider profile.
+
+    ``api`` selects the OpenAI surface: ``"chat_completions"`` (default — the
+    only mode implemented today) or ``"responses"`` (deferred; see issue #49).
+    The default is the working mode so a default-configured ``openai:`` run
+    succeeds rather than raising.
+    """
 
     api_key_env: str = "OPENAI_API_KEY"
-    api: str = "responses"
+    api: str = "chat_completions"
 
 
 class ProviderConfig(BaseModel):

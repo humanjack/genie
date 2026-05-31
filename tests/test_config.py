@@ -20,7 +20,7 @@ def test_defaults_when_no_file(tmp_path: Path):
     assert settings.provider.default == "anthropic:claude-sonnet-4-6"
     assert settings.provider.anthropic.api_key_env == "ANTHROPIC_API_KEY"
     assert settings.provider.openai.api_key_env == "OPENAI_API_KEY"
-    assert settings.provider.openai.api == "responses"
+    assert settings.provider.openai.api == "chat_completions"
     assert settings.loop.max_iterations == 50
     assert settings.loop.compaction_threshold == 0.8
     assert settings.tools.bash.timeout_seconds == 30

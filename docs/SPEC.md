@@ -724,7 +724,7 @@ api_key_env = "ANTHROPIC_API_KEY"
 
 [provider.openai]
 api_key_env = "OPENAI_API_KEY"
-api = "responses"                       # or "chat_completions"
+api = "chat_completions"                # implemented; "responses" deferred (issue #49)
 
 [loop]
 max_iterations = 50
