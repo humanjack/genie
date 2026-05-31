@@ -191,6 +191,10 @@ class HookManager:
         if event not in EVENTS:
             raise ValueError(f"unknown hook event: {event!r}")
 
+        # NOTE: this is a shallow copy. Replacing a key via `mutated_payload` is
+        # isolated, but a hook that mutates a *nested* object in place (e.g.
+        # payload["call"].args) will affect the caller's original object. Phase-2
+        # hooks should mutate via the returned mutated_payload, not in place.
         running = dict(payload)
         merged: dict = {}
         for hook in self.hooks:
