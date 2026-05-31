@@ -10,6 +10,10 @@ denying a dangerous command, and a transcript that actually replays.
 The scenarios map to docs/DEVELOPMENT_PLAN.md (S1-S5). S1-S3 + S5 are
 deterministic and run on every CI build; S4 hits the live Anthropic API and is
 skipped unless ``RUN_LIVE_API`` is set.
+
+Precondition: S1/S2 run ``python3`` through the sandbox, which curates the env
+to an allowlist that includes ``PATH`` — so a ``python3`` on ``PATH`` is
+assumed (true on stock macOS and the ubuntu CI image).
 """
 
 from __future__ import annotations
@@ -153,17 +157,21 @@ async def test_s3_dangerous_command_denied_session_continues(tmp_path: Path) -> 
     registry = build_registry(tmp_path)
     hooks = HookManager()
     hooks.register(_DenyDangerousBash())
-    session = _session(tmp_path, prompt="Delete everything in this directory.")
+    session = _session(tmp_path, prompt="Delete precious.txt.")
     provider = FakeProvider(
         [
-            _tool_turn("bash", {"command": "rm -rf ."}),
+            # A genuinely destructive command: `rm -rf precious.txt` DOES delete the
+            # file when unguarded (unlike `rm -rf .`, which rm refuses) — so the
+            # surviving-sentinel assertion below has real teeth.
+            _tool_turn("bash", {"command": "rm -rf precious.txt"}),
             _text_turn("Understood — I won't delete anything."),
         ]
     )
 
     result = await run_turn(session, provider, registry, hooks)
 
-    # The destructive command never ran: the sentinel survives.
+    # The destructive command never ran: the sentinel survives. (Would FAIL if the
+    # hook didn't block it — `rm -rf precious.txt` really removes the file.)
     assert (tmp_path / "precious.txt").read_text() == "do not delete me"
     # The denial was fed back to the model as a tool result.
     tool_msgs = _tool_messages(session)
