@@ -5,6 +5,15 @@
 working directory and a curated environment — plus a timeout and per-stream
 output caps. It is the default v1 runner; the heavier Docker backend (SPEC §6.3)
 and the bash-AST guard (SPEC §6.2) are deferred to later phases.
+
+**Scope of "confinement" (read before trusting it).** cwd confinement controls
+only the command's *starting directory*. It does **not** sandbox the filesystem
+or network: the command string still runs an arbitrary shell, so
+``cd / && cat /etc/passwd``, writes to absolute paths, and outbound network
+calls all succeed. Real filesystem/network isolation is the Docker backend's job
+(SPEC §6.3); per-command allow/deny is the bash-AST guard's (SPEC §6.2). For v1,
+the dangerous-tool approval hook (SPEC §7.3) is what gates risky commands — this
+backend is only the cwd/env/timeout primitive beneath it.
 """
 
 from __future__ import annotations
@@ -28,6 +37,15 @@ credentials. Anything else must be passed explicitly per call.
 
 TIMEOUT_RETURNCODE = 124
 """Exit status reported on timeout, matching the shell ``timeout(1)`` convention."""
+
+DRAIN_TIMEOUT = 2.0
+"""Seconds to wait draining output after a kill before giving up.
+
+A child that escaped the process group (e.g. via ``setsid``) can hold the
+stdout/stderr pipe open and make the post-kill ``communicate()`` block for its
+whole lifetime. Bounding the drain guarantees a timed-out :meth:`exec` still
+returns promptly, even if it means dropping a stuck child's trailing output.
+"""
 
 
 class LocalSubprocessBackend(SandboxBackend):
@@ -135,14 +153,18 @@ class LocalSubprocessBackend(SandboxBackend):
         run_cwd = self._resolve_cwd(cwd)
         run_env = self._build_env(env)
 
-        proc = await asyncio.create_subprocess_shell(
-            command,
-            cwd=str(run_cwd),
-            env=run_env,
-            stdout=asyncio.subprocess.PIPE,
-            stderr=asyncio.subprocess.PIPE,
-            start_new_session=True,
-        )
+        try:
+            proc = await asyncio.create_subprocess_shell(
+                command,
+                cwd=str(run_cwd),
+                env=run_env,
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.PIPE,
+                start_new_session=True,
+            )
+        except (FileNotFoundError, NotADirectoryError) as exc:
+            # cwd passed confinement but does not exist / is not a directory.
+            raise SandboxError(f"working directory does not exist: {run_cwd}") from exc
 
         timed_out = False
         try:
@@ -175,6 +197,9 @@ class LocalSubprocessBackend(SandboxBackend):
             os.killpg(proc.pid, signal.SIGKILL)
         with suppress(ProcessLookupError):
             proc.kill()
-        with suppress(Exception):
-            return await proc.communicate()
-        return b"", b""
+        # Bound the drain: a session-escaped child holding the pipe must not be
+        # able to block exec() past the timeout (see DRAIN_TIMEOUT).
+        try:
+            return await asyncio.wait_for(proc.communicate(), timeout=DRAIN_TIMEOUT)
+        except Exception:  # noqa: BLE001 — drain is best-effort; never block exec()
+            return b"", b""

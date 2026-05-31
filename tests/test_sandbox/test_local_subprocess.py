@@ -108,6 +108,27 @@ async def test_cwd_root_itself_allowed(tmp_path: Path) -> None:
     assert result.returncode == 0
 
 
+async def test_cwd_prefix_sibling_rejected(tmp_path: Path) -> None:
+    """A sibling sharing a name prefix (root /a/b, cwd /a/bb) must NOT pass.
+
+    Guards against a future regression to naive str.startswith confinement.
+    """
+    root = tmp_path / "b"
+    sibling = tmp_path / "bb"
+    root.mkdir()
+    sibling.mkdir()
+    backend = LocalSubprocessBackend(root)
+    with pytest.raises(SandboxError):
+        await backend.exec("pwd", cwd=sibling)
+
+
+async def test_missing_cwd_raises_sandbox_error(tmp_path: Path) -> None:
+    """A cwd inside root but not existing is a clean SandboxError, not a raw OSError."""
+    backend = LocalSubprocessBackend(tmp_path)
+    with pytest.raises(SandboxError, match="does not exist"):
+        await backend.exec("pwd", cwd=tmp_path / "ghost")
+
+
 async def test_cwd_symlink_escape_rejected(tmp_path: Path) -> None:
     root = tmp_path / "root"
     outside = tmp_path / "outside"
@@ -187,6 +208,26 @@ async def test_timeout_kills_process_group(tmp_path: Path) -> None:
     elapsed = time.monotonic() - start
     assert result.timed_out is True
     assert elapsed < 2.0
+
+
+async def test_timeout_returns_promptly_despite_session_escape(tmp_path: Path) -> None:
+    """A child that escapes the process group (setsid) must not hang exec().
+
+    Without a bounded post-kill drain, the escaped child holding the stdout pipe
+    blocks communicate() for its whole lifetime. Must return within the drain
+    bound, well under the child's sleep.
+    """
+    backend = LocalSubprocessBackend(tmp_path)
+    # setsid detaches the sleeper into its own session so killpg(group) misses
+    # it; it inherits and holds the stdout pipe.
+    command = "python3 -c 'import os,time; os.setsid(); time.sleep(20)' & sleep 20"
+    start = time.monotonic()
+    result = await backend.exec(command, timeout=0.3)
+    elapsed = time.monotonic() - start
+    assert result.timed_out is True
+    assert result.returncode == 124
+    # timeout (0.3) + drain bound (2.0) + slack — far below the 20s sleeps.
+    assert elapsed < 5.0
 
 
 async def test_fast_command_not_marked_timed_out(tmp_path: Path) -> None:
