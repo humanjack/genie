@@ -18,6 +18,9 @@ import json
 from pathlib import Path
 
 from genie.providers.base import ChatMessage
+from genie.utils.logger import get_logger
+
+_log = get_logger("genie.session.transcript")
 
 
 class Transcript:
@@ -84,17 +87,30 @@ class Transcript:
         ``usage`` that were persisted, which is how callers inspect metadata
         that :meth:`read` intentionally drops.
 
+        Robustness: a malformed line (e.g. a partial final line left by a crash
+        mid-write) is skipped and logged rather than raising — so a single
+        interrupted append can never make the prior, fully-committed history
+        unreadable. This is what makes the SPEC §9.3 resume primitive safe.
+
         Returns:
             The list of parsed JSON objects in file order.
         """
         if not self.path.exists():
             return []
+        lines = self.path.read_text(encoding="utf-8").splitlines()
         records: list[dict] = []
-        with self.path.open(encoding="utf-8") as fh:
-            for line in fh:
-                if not line.strip():
-                    continue
+        for line_no, line in enumerate(lines, start=1):
+            if not line.strip():
+                continue
+            try:
                 records.append(json.loads(line))
+            except json.JSONDecodeError:
+                _log.warning(
+                    "transcript_skipped_malformed_line",
+                    path=str(self.path),
+                    line_no=line_no,
+                    trailing=line_no == len(lines),
+                )
         return records
 
     def read(self) -> list[ChatMessage]:

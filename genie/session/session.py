@@ -27,6 +27,10 @@ from genie.providers.base import ChatMessage
 from genie.session.transcript import Transcript
 
 
+class SessionError(Exception):
+    """Raised when a session cannot be loaded (e.g. corrupt ``meta.json``)."""
+
+
 class Session:
     """A single conversation's state plus its durable transcript and metadata.
 
@@ -49,6 +53,7 @@ class Session:
         working_dir: str,
         transcript: Transcript,
         parent_id: str | None = None,
+        started_at: str | None = None,
         messages: list[ChatMessage] | None = None,
     ) -> None:
         """Construct a session from already-resolved parts.
@@ -70,6 +75,7 @@ class Session:
         self.model = model
         self.working_dir = working_dir
         self.parent_id = parent_id
+        self.started_at = started_at
         self.transcript = transcript
         self.messages: list[ChatMessage] = list(messages) if messages else []
 
@@ -132,6 +138,7 @@ class Session:
             working_dir=resolved_working_dir,
             transcript=transcript,
             parent_id=parent_id,
+            started_at=started_at,
         )
 
     @classmethod
@@ -151,6 +158,7 @@ class Session:
 
         Raises:
             FileNotFoundError: If the session's ``meta.json`` does not exist.
+            SessionError: If ``meta.json`` is corrupt or missing required keys.
         """
         session_dir = cls.dir_for(root, id)
         meta = _read_meta(session_dir)
@@ -161,6 +169,7 @@ class Session:
             working_dir=meta.working_dir,
             transcript=transcript,
             parent_id=meta.parent_id,
+            started_at=meta.started_at,
             messages=transcript.read(),
         )
 
@@ -242,12 +251,24 @@ def _write_meta(session_dir: Path, meta: _Meta) -> None:
 
 
 def _read_meta(session_dir: Path) -> _Meta:
-    """Read and parse ``meta.json`` from ``session_dir``."""
-    record = json.loads(_meta_path(session_dir).read_text(encoding="utf-8"))
-    return _Meta(
-        id=record["id"],
-        model=record["model"],
-        working_dir=record["working_dir"],
-        parent_id=record.get("parent_id"),
-        started_at=record.get("started_at"),
-    )
+    """Read and parse ``meta.json``, raising a clean error on corruption.
+
+    Raises:
+        FileNotFoundError: If ``meta.json`` is absent.
+        SessionError: If it is not valid JSON or is missing a required key.
+    """
+    path = _meta_path(session_dir)
+    try:
+        record = json.loads(path.read_text(encoding="utf-8"))
+    except json.JSONDecodeError as exc:
+        raise SessionError(f"corrupt session meta.json at {path}: {exc}") from exc
+    try:
+        return _Meta(
+            id=record["id"],
+            model=record["model"],
+            working_dir=record["working_dir"],
+            parent_id=record.get("parent_id"),
+            started_at=record.get("started_at"),
+        )
+    except (KeyError, TypeError) as exc:
+        raise SessionError(f"session meta.json at {path} is missing required key: {exc}") from exc

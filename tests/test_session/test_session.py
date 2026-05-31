@@ -13,7 +13,7 @@ from pathlib import Path
 import pytest
 
 from genie.providers.base import ChatMessage
-from genie.session.session import Session
+from genie.session.session import Session, SessionError
 
 
 def _conversation() -> list[ChatMessage]:
@@ -160,3 +160,26 @@ def test_child_session_records_parent_id(tmp_path: Path) -> None:
     meta = json.loads((tmp_path / "child" / "meta.json").read_text(encoding="utf-8"))
     assert meta["parent_id"] == "parent"
     assert Session.resume(tmp_path, "child").parent_id == "parent"
+
+
+def test_resume_restores_started_at(tmp_path: Path) -> None:
+    """started_at survives create -> resume so re-saved meta keeps creation time."""
+    Session.create(
+        tmp_path, id="s1", model="m", working_dir="/repo", started_at="2026-01-01T00:00:00Z"
+    )
+    resumed = Session.resume(tmp_path, "s1")
+    assert resumed.started_at == "2026-01-01T00:00:00Z"
+
+
+def test_resume_corrupt_meta_raises_session_error(tmp_path: Path) -> None:
+    Session.create(tmp_path, id="s1", model="m", working_dir="/repo")
+    (tmp_path / "s1" / "meta.json").write_text("{ not json", encoding="utf-8")
+    with pytest.raises(SessionError, match="corrupt"):
+        Session.resume(tmp_path, "s1")
+
+
+def test_resume_meta_missing_key_raises_session_error(tmp_path: Path) -> None:
+    Session.create(tmp_path, id="s1", model="m", working_dir="/repo")
+    (tmp_path / "s1" / "meta.json").write_text('{"id": "s1"}', encoding="utf-8")
+    with pytest.raises(SessionError, match="missing required key"):
+        Session.resume(tmp_path, "s1")

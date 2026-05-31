@@ -134,3 +134,28 @@ def test_append_creates_parent_directory(tmp_path: Path) -> None:
 
     assert path.exists()
     assert transcript.read()[0].content == "hi"
+
+
+def test_malformed_trailing_line_does_not_lose_prior_history(tmp_path: Path) -> None:
+    """A partial final line (crash mid-write) must not make prior lines unreadable."""
+    path = tmp_path / "transcript.jsonl"
+    transcript = Transcript(path)
+    transcript.append(ChatMessage(role="user", content="one"))
+    transcript.append(ChatMessage(role="assistant", content="two"))
+    # Simulate a torn final write: append a partial JSON line by hand.
+    with path.open("a", encoding="utf-8") as fh:
+        fh.write('{"role": "user", "content": "thr')  # no newline, truncated
+
+    messages = transcript.read()
+    assert [m.content for m in messages] == ["one", "two"]
+
+
+def test_malformed_interior_line_is_skipped(tmp_path: Path) -> None:
+    """A corrupt non-final line is skipped, not fatal; good lines still load."""
+    path = tmp_path / "transcript.jsonl"
+    path.write_text(
+        '{"role": "user", "content": "a"}\n}{ not json\n{"role": "assistant", "content": "b"}\n',
+        encoding="utf-8",
+    )
+    transcript = Transcript(path)
+    assert [m.content for m in transcript.read()] == ["a", "b"]
