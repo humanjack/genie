@@ -190,8 +190,10 @@ def _cmd_code(args: argparse.Namespace) -> int:
         registry = build_registry(root)
         hooks = HookManager()
         hooks.register(ToolCallDisplay())
+        # Session state lives under ~/.genie/sessions (SPEC §9.1), NOT inside the
+        # project — so it never pollutes the workspace the agent's own tools read.
         session = Session.create(
-            root / ".genie" / "sessions",
+            Path.home() / ".genie" / "sessions",
             id=uuid4().hex,
             model=spec,
             working_dir=str(root),

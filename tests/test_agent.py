@@ -6,7 +6,7 @@ scripted ``read_input`` callable, so no terminal or network is involved.
 
 from __future__ import annotations
 
-from collections.abc import Callable
+from collections.abc import AsyncIterator, Callable
 from pathlib import Path
 
 from genie.agent import (
@@ -17,6 +17,7 @@ from genie.agent import (
 )
 from genie.hooks.manager import HookManager
 from genie.loop import ToolCall
+from genie.providers.base import ChatChunk, ProviderClient
 from genie.providers.fake import FakeProvider
 from genie.session.session import Session
 from genie.tools.result import ToolResult
@@ -192,6 +193,35 @@ async def test_run_code_session_exit_command(tmp_path: Path) -> None:
         read_input=_scripted_input("/exit"),
     )
     assert session.materialize_messages() == []
+
+
+async def test_run_code_session_ctrl_c_during_turn_continues(tmp_path: Path) -> None:
+    """Ctrl-C during a turn is caught and reported; the REPL does not crash (US headline)."""
+
+    class _InterruptingProvider(ProviderClient):
+        name = "fake"
+        model = "fake-1"
+
+        async def stream(self, messages, tools, **kwargs) -> AsyncIterator[ChatChunk]:
+            raise KeyboardInterrupt
+            yield ChatChunk()  # pragma: no cover - unreachable, makes this a generator
+
+        def count_tokens(self, messages) -> int:  # pragma: no cover
+            return 0
+
+    notices: list[str] = []
+    # One line triggers the interrupt mid-turn; EOF then ends the loop cleanly.
+    await run_code_session(
+        _InterruptingProvider(),
+        build_registry(tmp_path),
+        HookManager(),
+        _session(tmp_path),
+        system="s",
+        read_input=_scripted_input("do something", None),
+        write=notices.append,
+    )
+
+    assert any("interrupted" in n for n in notices)
 
 
 async def test_run_code_session_skips_blank_lines(tmp_path: Path) -> None:
