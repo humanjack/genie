@@ -156,7 +156,8 @@ def _schema_from_signature(func: Callable[..., Any], tool_name: str) -> dict:
     # schema instead of crashing create_model on an unresolved forward ref.
     try:
         hints = get_type_hints(func)
-    except Exception as exc:  # noqa: BLE001 — surface any resolution failure clearly
+    except Exception as exc:
+        # Surface any annotation-resolution failure as a clear decoration error.
         raise TypeError(f"@tool could not resolve type hints for {tool_name!r}: {exc}") from exc
     hints.pop("return", None)
 
