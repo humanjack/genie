@@ -49,9 +49,12 @@ def test_anthropic_factory_builds_client() -> None:
     assert provider.model == "claude-sonnet-4-6"
 
 
-def test_openai_not_yet_available() -> None:
-    with pytest.raises(RuntimeError, match="openai provider not yet available"):
-        provider_factory("openai:gpt-5")
+def test_openai_factory_builds_client() -> None:
+    from genie.providers.openai_client import OpenAIClient
+
+    provider = provider_factory("openai:gpt-5", client=object())
+    assert isinstance(provider, OpenAIClient)
+    assert provider.model == "gpt-5"
 
 
 def test_settings_ignored_by_fake() -> None:
