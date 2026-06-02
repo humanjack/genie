@@ -2,13 +2,19 @@
 
 A from-scratch, Python-native AI coding agent. Minimal, secure, pluggable — and powerful enough to dogfood from Phase 1.
 
-See [docs/SPEC.md](docs/SPEC.md) for the full specification and [docs/DEVELOPMENT_PLAN.md](docs/DEVELOPMENT_PLAN.md) for the rolling PR plan.
+Documentation:
+
+- [docs/SPEC.md](docs/SPEC.md) — the full specification (all seven phases).
+- [docs/DESIGN.md](docs/DESIGN.md) — architecture & design rationale for what's shipped.
+- [docs/IMPLEMENTATION.md](docs/IMPLEMENTATION.md) — file-by-file implementation detail.
+- [docs/DEVELOPMENT_PLAN.md](docs/DEVELOPMENT_PLAN.md) — the rolling PR plan.
 
 ## Status
 
-Phase 0 (skeleton + provider abstraction) — in progress.
+Phase 0 (skeleton + provider abstraction) and Phase 1 (ReAct loop + four tools) complete —
+tag `v0.1.0-phase1`. 374 tests, 99% coverage. Phase 2 (safety hooks) is next.
 
-## Quickstart (once Phase 0 lands)
+## Quickstart
 
 ```bash
 make install
