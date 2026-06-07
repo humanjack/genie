@@ -204,3 +204,13 @@ class LocalSubprocessBackend(SandboxBackend):
         except Exception:
             # Drain is best-effort: never let a stuck child block exec().
             return b"", b""
+        finally:
+            # Release our read-pipe fds even when the drain timed out with an
+            # escaped child still holding the write end. Left open, the subprocess
+            # transport stays "open" and emits a ResourceWarning (surfaced as an
+            # unraisable-exception warning under pytest's collector) when it is
+            # garbage-collected after the event loop has already closed.
+            transport = getattr(proc, "_transport", None)
+            if transport is not None:
+                with suppress(Exception):
+                    transport.close()
