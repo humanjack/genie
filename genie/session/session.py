@@ -21,6 +21,7 @@ construction and replay are deterministic and testable.
 from __future__ import annotations
 
 import json
+from dataclasses import dataclass
 from pathlib import Path
 
 from genie.providers.base import ChatMessage
@@ -208,25 +209,15 @@ class Session:
         return list(self.messages)
 
 
+@dataclass(kw_only=True, slots=True)
 class _Meta:
     """The contents of ``meta.json`` (SPEC §9.1), without a generated clock."""
 
-    __slots__ = ("id", "model", "parent_id", "started_at", "working_dir")
-
-    def __init__(
-        self,
-        *,
-        id: str,
-        model: str,
-        working_dir: str,
-        parent_id: str | None = None,
-        started_at: str | None = None,
-    ) -> None:
-        self.id = id
-        self.model = model
-        self.working_dir = working_dir
-        self.parent_id = parent_id
-        self.started_at = started_at
+    id: str
+    model: str
+    working_dir: str
+    parent_id: str | None = None
+    started_at: str | None = None
 
 
 def _meta_path(session_dir: Path) -> Path:

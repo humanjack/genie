@@ -17,11 +17,10 @@ usage is emitted on its own terminal :class:`ChatChunk` when it lands.
 from __future__ import annotations
 
 import json
-import os
 from collections.abc import AsyncIterator
 from typing import TYPE_CHECKING, Any
 
-from genie.providers.base import ChatChunk, ChatMessage, ProviderClient
+from genie.providers.base import ChatChunk, ChatMessage, ProviderClient, resolve_api_key
 
 if TYPE_CHECKING:
     from openai import AsyncOpenAI
@@ -152,24 +151,14 @@ class OpenAIClient(ProviderClient):
     def _ensure_client(self) -> AsyncOpenAI:
         """Return the OpenAI client, building it lazily on first use.
 
-        The API key is resolved via ``settings.require_api_key("openai", env)``
-        when settings are present, else from the ``OPENAI_API_KEY`` environment
-        variable. Building is deferred so construction never needs a key.
+        Building is deferred so construction never needs a key; see
+        :func:`~genie.providers.base.resolve_api_key` for how the key resolves.
         """
         if self._client is None:
             from openai import AsyncOpenAI
 
-            require_api_key = getattr(self._settings, "require_api_key", None)
-            if require_api_key is not None:
-                api_key = require_api_key("openai", os.environ)
-            else:
-                api_key = os.environ.get("OPENAI_API_KEY")
-                if not api_key:
-                    raise ValueError(
-                        "Missing API key for provider 'openai': "
-                        "set the OPENAI_API_KEY environment variable."
-                    )
-            self._client = AsyncOpenAI(api_key=api_key)
+            key = resolve_api_key(self._settings, "openai", "OPENAI_API_KEY")
+            self._client = AsyncOpenAI(api_key=key)
         return self._client
 
     async def stream(
@@ -236,16 +225,6 @@ class OpenAIClient(ProviderClient):
             for mapped in _map_chunk(chunk):
                 yield mapped
 
-    def count_tokens(self, messages: list[ChatMessage]) -> int:
-        """Estimate the token count for ``messages`` (chars // 4, min 1).
-
-        This is a deterministic local heuristic, not a precise tokenization:
-        precise counting via ``tiktoken`` is deferred to avoid the dependency
-        (issue #47). The estimate is intentionally cheap and offline.
-        """
-        chars = sum(len(str(m.content)) for m in messages)
-        return max(1, chars // 4)
-
 
 def _map_chunk(chunk: Any) -> list[ChatChunk]:
     """Map one OpenAI ``ChatCompletionChunk`` to zero or more :class:`ChatChunk`.
@@ -266,9 +245,11 @@ def _map_chunk(chunk: Any) -> list[ChatChunk]:
                 out.append(ChatChunk(delta_text=content))
             for tool_call in getattr(delta, "tool_calls", None) or []:
                 out.append(ChatChunk(tool_call_delta=_map_tool_call_delta(tool_call)))
+        # OpenAI's finish reasons ("stop", "tool_calls", "length",
+        # "content_filter") already match the contract vocabulary verbatim.
         finish_reason = getattr(choice, "finish_reason", None)
         if finish_reason is not None:
-            out.append(ChatChunk(finish_reason=_map_finish_reason(finish_reason)))
+            out.append(ChatChunk(finish_reason=finish_reason))
 
     usage = getattr(chunk, "usage", None)
     if usage is not None:
@@ -300,13 +281,3 @@ def _map_tool_call_delta(tool_call: Any) -> dict:
     if name is not None:
         delta["name"] = name
     return delta
-
-
-def _map_finish_reason(finish_reason: str) -> str:
-    """Return the contract finish reason for an OpenAI ``finish_reason``.
-
-    OpenAI's values (``"stop"``, ``"tool_calls"``, ``"length"``,
-    ``"content_filter"``) already match the contract's vocabulary, so this is a
-    pass-through kept as a seam for any future remapping.
-    """
-    return finish_reason
