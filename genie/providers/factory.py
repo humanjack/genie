@@ -1,12 +1,9 @@
 """The single startup wiring point for provider clients.
 
 ``provider_factory`` turns a ``"provider:model"`` spec string into a concrete
-:class:`ProviderClient`. Real SDK-backed providers are imported **lazily**,
-inside their loader functions, so importing this module never imports the
-``anthropic`` or ``openai`` SDKs — and never requires their client modules to
-exist yet. This is what keeps this PR independent of the not-yet-built
-``anthropic_client`` / ``openai_client`` modules: a missing module degrades to
-a clear, actionable error only when that provider is actually requested.
+:class:`ProviderClient`. Real SDK-backed adapters are imported **lazily**,
+inside their loader functions, so importing this module stays cheap and pulls
+in only the provider actually requested.
 
 Adding a provider later is a one-line edit to :data:`_REGISTRY` — the
 extension seam.
@@ -26,30 +23,16 @@ def _load_fake(model: str, **kwargs) -> ProviderClient:
 
 
 def _load_anthropic(model: str, *, settings: object | None = None, **kwargs) -> ProviderClient:
-    """Lazily load the Anthropic adapter (built in a later PR)."""
-    try:
-        # Built in a later PR; guarded so this PR stays self-contained.
-        from genie.providers.anthropic_client import (  # pyright: ignore[reportMissingImports]
-            AnthropicClient,
-        )
-    except ImportError as exc:  # pragma: no cover - exercised via factory test
-        raise RuntimeError(
-            "anthropic provider not yet available (genie.providers.anthropic_client missing)"
-        ) from exc
+    """Lazily load the Anthropic adapter."""
+    from genie.providers.anthropic_client import AnthropicClient
+
     return AnthropicClient(model=model, settings=settings, **kwargs)
 
 
 def _load_openai(model: str, *, settings: object | None = None, **kwargs) -> ProviderClient:
-    """Lazily load the OpenAI adapter (built in a later PR)."""
-    try:
-        # Built in a later PR; guarded so this PR stays self-contained.
-        from genie.providers.openai_client import (  # pyright: ignore[reportMissingImports]
-            OpenAIClient,
-        )
-    except ImportError as exc:  # pragma: no cover - exercised via factory test
-        raise RuntimeError(
-            "openai provider not yet available (genie.providers.openai_client missing)"
-        ) from exc
+    """Lazily load the OpenAI adapter."""
+    from genie.providers.openai_client import OpenAIClient
+
     return OpenAIClient(model=model, settings=settings, **kwargs)
 
 
@@ -77,7 +60,6 @@ def provider_factory(spec: str, *, settings: object | None = None, **kwargs) -> 
 
     Raises:
         ValueError: If ``spec`` has no colon, or names an unknown provider.
-        RuntimeError: If a known provider's client module is not yet available.
     """
     if ":" not in spec:
         raise ValueError(

@@ -15,12 +15,12 @@ consolidated invariants/gotchas cheat-sheet. §6 is testing + metrics. §7 is ex
 
 | Metric | Value |
 |---|---|
-| Source lines (`genie/`, incl. docstrings) | 4,160 across 32 modules |
+| Source lines (`genie/`, incl. docstrings) | ~4,100 across 32 modules |
 | `loop.py` | **293 lines** (SPEC target ≤300) |
-| Tests | **374 passing**, 6 skipped (live-API, gated by `RUN_LIVE_API`) |
-| Coverage | **99%** total; every package ≥90% (lowest: `edit_file.py` 90%, `cli.py` 92%, `agent.py` 95%) |
+| Tests | **372 passing**, 6 skipped (live-API, gated by `RUN_LIVE_API`) |
+| Coverage | **99%** total; every package ≥90% (lowest: `edit_file.py` 90%, `cli.py` 93%, `agent.py` 95%) |
 | CI matrix | Python 3.11 + 3.12; ruff check + `ruff format --check` + pyright + pytest `--cov-fail-under=70` |
-| Runtime deps | `anthropic`, `openai`, `pydantic`, `pydantic-settings`, `httpx`, `rich`, `structlog` |
+| Runtime deps | `anthropic`, `openai`, `pydantic`, `rich`, `structlog` |
 
 ---
 
@@ -29,16 +29,16 @@ consolidated invariants/gotchas cheat-sheet. §6 is testing + metrics. §7 is ex
 ```
 genie/
 ├── __init__.py
-├── cli.py                  228  entrypoint: chat-once (P0) + code (P1) subcommands
+├── cli.py                  220  entrypoint: chat-once (P0) + code (P1) subcommands
 ├── agent.py                229  coding-agent wiring (build_registry) + REPL core
 ├── loop.py                 293  the ReAct loop — run_turn, dispatch_tool_calls
-├── config.py               230  typed settings: defaults < TOML < env
+├── config.py               217  typed settings: defaults < TOML < env
 ├── providers/
-│   ├── base.py             125  ChatMessage, ChatChunk, ProviderClient (ABC)
-│   ├── fake.py             203  FakeProvider — scripted streams (the test seam)
-│   ├── anthropic_client.py 261  Anthropic Messages API adapter
-│   ├── openai_client.py    312  OpenAI chat-completions adapter
-│   └── factory.py           94  provider_factory("provider:model")
+│   ├── base.py             154  ChatMessage, ChatChunk, ProviderClient (ABC)
+│   ├── fake.py             198  FakeProvider — scripted streams (the test seam)
+│   ├── anthropic_client.py 239  Anthropic Messages API adapter
+│   ├── openai_client.py    283  OpenAI chat-completions adapter
+│   └── factory.py           76  provider_factory("provider:model")
 ├── tools/
 │   ├── base.py             182  Tool model + @tool decorator + schema derivation
 │   ├── registry.py         195  ToolRegistry: register, specs_for, call
@@ -56,12 +56,12 @@ genie/
 │   ├── local_subprocess.py 206  LocalSubprocessBackend
 │   └── recording.py         96  RecordingBackend (the test seam)
 ├── session/
-│   ├── session.py          274  Session.create/resume, meta.json, append
+│   ├── session.py          265  Session.create/resume, meta.json, append
 │   └── transcript.py       136  Transcript — append-only JSONL r/w
 └── utils/
     └── logger.py           167  structlog config + secret redaction
 
-tests/                            374 tests mirroring the package tree
+tests/                            372 tests mirroring the package tree
 ├── e2e/test_user_stories.py       S1–S5 — drive the whole stack as a user
 ├── integration/test_phase0.py     provider abstraction end-to-end
 └── test_*/                         one suite per module
@@ -135,8 +135,9 @@ unreachable `yield ChatChunk()` so type-checkers infer `AsyncIterator` correctly
   `content_block_start` opens a slot keyed by block `index`; `text_delta → delta_text`;
   `input_json_delta.partial_json → arguments_delta`; the terminal `message_delta` yields
   `finish_reason` + assembled `usage`.
-- `count_tokens` is a `chars // 4` estimate (min 1) — deliberately offline; precise async
-  counting is deferred (issue #47).
+- `count_tokens` is a `chars // 4` estimate (min 1) — deliberately offline; the heuristic is
+  the `ProviderClient` base default shared by every provider, and precise async counting is
+  deferred (issue #47).
 
 **`openai_client.py` — `OpenAIClient`.** Chat-completions only.
 - **`responses` mode raises `NotImplementedError`** (deferred, issue #49). Mode resolves from
@@ -343,7 +344,8 @@ The centerpiece. Holds no policy and no provider knowledge.
 - **`code`** (`_cmd_code`): builds provider + `build_registry(root)` + a `HookManager` with
   `ToolCallDisplay`; creates a session under **`~/.genie/sessions/<uuid4().hex>`** (the one place
   a uuid is minted — kept out of the deterministic modules) with `working_dir = root`; runs the
-  REPL via the overridable `_READ_INPUT` seam.
+  REPL with `_stdin_reader` as the input source (tests monkeypatch it to drive the REPL
+  without a terminal).
 - **Boundary error handling**: `KeyboardInterrupt` → 130; any other `Exception` → one clean
   stderr line (no traceback), logged with `error_type`, exit 1.
 

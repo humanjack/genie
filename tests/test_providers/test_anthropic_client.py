@@ -359,7 +359,8 @@ async def test_stream_without_key_raises_actionable_error(monkeypatch) -> None:
 
 def test_env_api_key_resolved_without_settings(monkeypatch) -> None:
     monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-from-env")
-    assert AnthropicClient(model="claude-sonnet-4-6")._resolve_api_key() == "sk-from-env"
+    built = AnthropicClient(model="claude-sonnet-4-6")._get_client()
+    assert built.api_key == "sk-from-env"
 
 
 async def test_settings_require_api_key_consulted(monkeypatch) -> None:
@@ -373,8 +374,8 @@ async def test_settings_require_api_key_consulted(monkeypatch) -> None:
 
     settings = FakeSettings()
     client = AnthropicClient(model="claude-sonnet-4-6", settings=settings)
-    # _resolve_api_key should route through settings, not the env var.
-    assert client._resolve_api_key() == "sk-from-settings"
+    # The key must route through settings, not the env var.
+    assert client._get_client().api_key == "sk-from-settings"
     assert settings.calls[0][0] == "anthropic"
 
 

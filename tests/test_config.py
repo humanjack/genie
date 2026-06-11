@@ -212,34 +212,11 @@ def test_require_api_key_raises_naming_the_env_var():
         settings.require_api_key("openai", {})
 
 
-def test_memory_user_file_tilde_expansion():
-    """memory.resolved_user_file expands a leading ~ to the home dir."""
-    settings = Settings()
-    expanded = settings.memory.resolved_user_file()
-
-    assert "~" not in expanded
-    assert expanded.endswith("/.genie/MEMORY.md")
-    assert expanded == str(Path.home() / ".genie" / "MEMORY.md")
-
-
-def test_skills_dirs_tilde_expansion():
-    """skills.resolved_dirs expands a leading ~ in each entry."""
-    settings = Settings()
-    settings.skills.dirs = ["~/.genie/skills", "/abs/path"]
-
-    resolved = settings.skills.resolved_dirs()
-
-    assert resolved[0] == str(Path.home() / ".genie" / "skills")
-    assert resolved[1] == "/abs/path"
-    assert all("~" not in d for d in resolved)
-
-
-def test_loaded_skills_dirs_expand(tmp_path: Path):
-    """Tilde expansion works on dirs sourced from a TOML file."""
+def test_loaded_skills_dirs_kept_verbatim(tmp_path: Path):
+    """Dirs sourced from a TOML file are stored verbatim (no eager expansion)."""
     config = tmp_path / "config.toml"
     config.write_text('[skills]\ndirs = ["~/custom/skills"]\n')
 
     settings = load_config(config, env={})
 
     assert settings.skills.dirs == ["~/custom/skills"]
-    assert settings.skills.resolved_dirs() == [str(Path.home() / "custom" / "skills")]
