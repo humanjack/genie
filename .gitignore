@@ -6,8 +6,8 @@ build/
 dist/
 .eggs/
 
-# Virtualenvs
-.venv/
+# Virtualenvs (no trailing slash: also matches a .venv symlink)
+.venv
 venv/
 env/
 
