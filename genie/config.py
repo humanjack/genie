@@ -24,11 +24,6 @@ DEFAULT_CONFIG_PATH = Path("~/.genie/config.toml")
 PROVIDER_DEFAULT_ENV = "GENIE_PROVIDER_DEFAULT"
 
 
-def _expand(path: str) -> str:
-    """Expand a leading ``~`` in a path-like string."""
-    return str(Path(path).expanduser())
-
-
 class ProviderProfile(BaseModel):
     """Shared base for per-provider profiles; carries the API-key env var name."""
 
@@ -104,19 +99,11 @@ class MemoryConfig(BaseModel):
     project_file: str = "AGENTS.md"
     user_file: str = "~/.genie/MEMORY.md"
 
-    def resolved_user_file(self) -> str:
-        """Return ``user_file`` with a leading ``~`` expanded to the home dir."""
-        return _expand(self.user_file)
-
 
 class SkillsConfig(BaseModel):
     """Skill discovery directories (SPEC §13 ``[skills]``)."""
 
     dirs: list[str] = Field(default_factory=lambda: ["~/.genie/skills"])
-
-    def resolved_dirs(self) -> list[str]:
-        """Return ``dirs`` with leading ``~`` expanded to the home dir."""
-        return [_expand(d) for d in self.dirs]
 
 
 class Settings(BaseModel):

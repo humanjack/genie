@@ -130,11 +130,6 @@ class FakeProvider(ProviderClient):
         for chunk in turn:
             yield chunk
 
-    def count_tokens(self, messages: list[ChatMessage]) -> int:
-        """Return a deterministic cheap estimate: ~4 chars per token, min 1."""
-        chars = sum(len(str(m.content)) for m in messages)
-        return max(1, chars // 4)
-
     @classmethod
     def from_text(
         cls,

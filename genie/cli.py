@@ -71,15 +71,11 @@ async def run_chat_once(
 
 def _print_usage(usage: dict) -> None:
     """Write a minimal, dim token-usage summary to stderr."""
+    from rich.console import Console
+
     in_tokens = usage.get("input_tokens", 0)
     out_tokens = usage.get("output_tokens", 0)
-    line = f"[usage] in={in_tokens} out={out_tokens}"
-    try:
-        from rich.console import Console
-
-        Console(stderr=True).print(line, style="dim")
-    except Exception:
-        print(line, file=sys.stderr)
+    Console(stderr=True).print(f"[usage] in={in_tokens} out={out_tokens}", style="dim")
 
 
 def _build_parser() -> argparse.ArgumentParser:
@@ -179,7 +175,8 @@ def _cmd_code(args: argparse.Namespace) -> int:
     Wires a provider, the four built-in tools (confined to ``path``), a
     tool-call display hook, and a fresh session, then drives the REPL. Provider
     and tool errors surface as one clean stderr line (no traceback); the input
-    source is :data:`_READ_INPUT` so tests can inject a scripted reader.
+    source is :func:`_stdin_reader`, which tests monkeypatch to inject a
+    scripted reader.
     """
     log = get_logger("genie.cli")
     try:
@@ -205,7 +202,7 @@ def _cmd_code(args: argparse.Namespace) -> int:
                 hooks,
                 session,
                 system=load_system_prompt(),
-                read_input=_READ_INPUT,
+                read_input=_stdin_reader,
                 max_iterations=settings.loop.max_iterations,
             )
         )
@@ -217,11 +214,6 @@ def _cmd_code(args: argparse.Namespace) -> int:
         print(f"genie: {exc}", file=sys.stderr)
         return 1
     return 0
-
-
-# The REPL input source; overridable in tests (a scripted reader) so the code
-# session can be driven without a real terminal.
-_READ_INPUT = _stdin_reader
 
 
 if __name__ == "__main__":

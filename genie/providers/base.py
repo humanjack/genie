@@ -9,9 +9,33 @@ SDK's wire format, so the agent loop never learns who is on the other end.
 
 from __future__ import annotations
 
+import os
 from abc import ABC, abstractmethod
 from collections.abc import AsyncIterator
 from dataclasses import dataclass
+
+
+def resolve_api_key(settings: object | None, provider_name: str, env_var: str) -> str:
+    """Resolve ``provider_name``'s API key from settings or the environment.
+
+    When ``settings`` exposes ``require_api_key`` (the
+    :class:`~genie.config.Settings` contract) it is consulted with the live
+    environment; otherwise ``env_var`` is read directly. Shared by the SDK
+    adapters so credential resolution lives in one audited place.
+
+    Raises:
+        ValueError: If no key is found, naming the environment variable to set.
+    """
+    require = getattr(settings, "require_api_key", None)
+    if require is not None:
+        return require(provider_name, os.environ)
+    key = os.environ.get(env_var)
+    if not key:
+        raise ValueError(
+            f"Missing API key for provider {provider_name!r}: "
+            f"set the {env_var} environment variable."
+        )
+    return key
 
 
 @dataclass
@@ -119,7 +143,12 @@ class ProviderClient(ABC):
         # Make this an async generator for type checkers; never reached.
         yield ChatChunk()  # pragma: no cover
 
-    @abstractmethod
     def count_tokens(self, messages: list[ChatMessage]) -> int:
-        """Return the token count for ``messages`` under this provider/model."""
-        raise NotImplementedError
+        """Estimate the token count for ``messages`` (chars // 4, minimum 1).
+
+        A deterministic, offline heuristic — not a real tokenization — shared
+        by every Phase-1 provider. Precise (async, SDK-backed) counting is
+        deferred to issue #47; an adapter that gains it overrides this method.
+        """
+        chars = sum(len(str(m.content)) for m in messages)
+        return max(1, chars // 4)

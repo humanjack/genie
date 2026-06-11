@@ -14,11 +14,8 @@ dependencies = [
     "anthropic>=0.107",
     "openai>=2.41",
     "pydantic>=2.13",
-    "pydantic-settings>=2.14",
-    "httpx>=0.28",
     "rich>=15.0",
     "structlog>=26.1",
-    "tomli>=2.4; python_version<'3.11'",
 ]
 
 [project.optional-dependencies]
@@ -43,7 +40,6 @@ addopts = "-ra --strict-markers"
 
 [tool.coverage.run]
 source = ["genie"]
-omit = ["genie/__main__.py"]
 
 [tool.coverage.report]
 exclude_lines = [

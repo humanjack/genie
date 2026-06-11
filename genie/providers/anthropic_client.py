@@ -10,11 +10,10 @@ the real and fake providers are interchangeable.
 
 from __future__ import annotations
 
-import os
 from collections.abc import AsyncIterator
 from typing import Any
 
-from genie.providers.base import ChatChunk, ChatMessage, ProviderClient
+from genie.providers.base import ChatChunk, ChatMessage, ProviderClient, resolve_api_key
 
 # Anthropic stop_reason -> contract finish_reason. Unmapped reasons pass through.
 _STOP_REASON_MAP = {"end_turn": "stop", "tool_use": "tool_calls"}
@@ -55,24 +54,13 @@ class AnthropicClient(ProviderClient):
         self._settings = settings
         self._client = client
 
-    def _resolve_api_key(self) -> str:
-        """Return the API key, raising a clear error if it is missing."""
-        if self._settings is not None and hasattr(self._settings, "require_api_key"):
-            return self._settings.require_api_key("anthropic", os.environ)  # type: ignore[attr-defined]
-        key = os.environ.get("ANTHROPIC_API_KEY")
-        if not key:
-            raise ValueError(
-                "Missing API key for provider 'anthropic': "
-                "set the ANTHROPIC_API_KEY environment variable."
-            )
-        return key
-
     def _get_client(self) -> Any:
         """Return the SDK client, building it lazily on first use."""
         if self._client is None:
             from anthropic import AsyncAnthropic
 
-            self._client = AsyncAnthropic(api_key=self._resolve_api_key())
+            key = resolve_api_key(self._settings, "anthropic", "ANTHROPIC_API_KEY")
+            self._client = AsyncAnthropic(api_key=key)
         return self._client
 
     @staticmethod
@@ -249,13 +237,3 @@ class AnthropicClient(ProviderClient):
                         finish_reason=finish_reason,
                         usage=self._usage_dict(start_usage, output_tokens),
                     )
-
-    def count_tokens(self, messages: list[ChatMessage]) -> int:
-        """Return a deterministic local estimate of the prompt's token count.
-
-        Uses a cheap ``chars // 4`` heuristic (minimum 1) to avoid a network
-        round-trip. This is an *estimate*, not Anthropic's exact tokenizer count;
-        a precise async ``messages.count_tokens`` call is deferred (issue #47).
-        """
-        chars = sum(len(str(m.content)) for m in messages)
-        return max(1, chars // 4)

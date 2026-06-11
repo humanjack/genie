@@ -209,7 +209,7 @@ def test_main_code_runs_a_session(capsys, monkeypatch, tmp_path):
     )
     # Drive the REPL with one line then EOF, without a real terminal.
     lines = iter(["hello", None])
-    monkeypatch.setattr(cli, "_READ_INPUT", lambda: next(lines))
+    monkeypatch.setattr(cli, "_stdin_reader", lambda: next(lines))
 
     rc = main(["code", str(tmp_path), "--model", "fake:fake-1"])
 
