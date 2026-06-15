@@ -1,10 +1,12 @@
 .PHONY: install lint typecheck test cov all clean
 
-PY ?= python3.11
+PY ?= $(shell command -v python3.11 || command -v python3.12 || command -v python3.13 || command -v python3)
 VENV ?= .venv
 BIN  := $(VENV)/bin
 
 install:
+	@$(PY) -c 'import sys; raise SystemExit(0 if sys.version_info >= (3,11) else 1)' \
+		|| { echo "Error: $(PY) is $$($(PY) --version 2>&1), but genie needs >=3.11"; exit 1; }
 	$(PY) -m venv $(VENV)
 	$(BIN)/pip install -U pip
 	$(BIN)/pip install -e ".[dev]"
