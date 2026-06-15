@@ -1,4 +1,4 @@
-.PHONY: install lint typecheck test cov all clean
+.PHONY: install run lint typecheck test cov all clean
 
 PY ?= $(shell command -v python3.11 || command -v python3.12 || command -v python3.13 || command -v python3)
 VENV ?= .venv
@@ -10,6 +10,13 @@ install:
 	$(PY) -m venv $(VENV)
 	$(BIN)/pip install -U pip
 	$(BIN)/pip install -e ".[dev]"
+
+# Start the interactive genie REPL (Phase 1 `code`).
+# Override the subcommand/args, e.g. `make run ARGS="chat-once 'hello'"`.
+ARGS ?= code
+run:
+	@test -x $(BIN)/genie || { echo "genie not installed — run 'make install' first"; exit 1; }
+	$(BIN)/genie $(ARGS)
 
 lint:
 	$(BIN)/ruff check genie tests
