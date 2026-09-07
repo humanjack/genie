@@ -446,19 +446,23 @@ async def test_async_count_propagates_sdk_failure() -> None:
 
 
 async def test_async_count_with_real_sdk_and_offline_transport() -> None:
-    import httpx
-    from anthropic import AsyncAnthropic
+    from importlib import import_module
 
-    requests: list[httpx.Request] = []
+    from anthropic import AsyncAnthropic, DefaultAsyncHttpxClient
 
-    async def handler(request: httpx.Request) -> httpx.Response:
+    # The SDK switched from httpx to httpx2 in 1.x. Use its exported client's
+    # HTTP implementation so this also works when both packages are installed.
+    http = import_module(DefaultAsyncHttpxClient.__bases__[0].__module__.split(".")[0])
+    requests = []
+
+    async def handler(request):
         requests.append(request)
-        return httpx.Response(200, json={"input_tokens": 67})
+        return http.Response(200, json={"input_tokens": 67})
 
     tools = [{"name": "read", "input_schema": {"type": "object"}}]
     async with AsyncAnthropic(
         api_key="test-key",
-        http_client=httpx.AsyncClient(transport=httpx.MockTransport(handler)),
+        http_client=DefaultAsyncHttpxClient(transport=http.MockTransport(handler)),
     ) as sdk:
         client = AnthropicClient(model="claude-sonnet-4-6", client=sdk)
         result = await client.count_tokens_async(
