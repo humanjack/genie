@@ -22,9 +22,9 @@ _STOP_REASON_MAP = {"end_turn": "stop", "tool_use": "tool_calls"}
 class AnthropicClient(ProviderClient):
     """Stream completions from Anthropic's Messages API.
 
-    The SDK client is created lazily on the first :meth:`stream` call (or
+    The SDK client is created lazily on the first stream or async token-count call (or
     injected via ``client=`` for tests), so constructing this object never
-    requires an API key — only actually streaming does. Credentials resolve via
+    requires an API key — streaming and async token counting do. Credentials resolve via
     ``settings.require_api_key("anthropic", os.environ)`` when a settings object
     is supplied, otherwise from the ``ANTHROPIC_API_KEY`` environment variable.
     """
@@ -165,6 +165,29 @@ class AnthropicClient(ProviderClient):
                 usage["cache_write"] = cache_write
         usage["output_tokens"] = output_tokens or 0
         return usage
+
+    async def count_tokens_async(
+        self,
+        messages: list[ChatMessage],
+        *,
+        tools: list[dict] | None = None,
+        system: str | None = None,
+    ) -> int:
+        """Ask Anthropic for input tokens using the same message translation.
+
+        Unlike the synchronous offline estimate, this awaits the SDK counting
+        endpoint. Credentials resolve lazily and SDK errors propagate unchanged.
+        """
+        params: dict[str, Any] = {
+            "model": self.model,
+            "messages": [self._translate_message(message) for message in messages],
+        }
+        if tools:
+            params["tools"] = tools
+        if system is not None:
+            params["system"] = system
+        result = await self._get_client().messages.count_tokens(**params)
+        return result.input_tokens
 
     async def stream(
         self,

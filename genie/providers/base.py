@@ -13,6 +13,8 @@ import os
 from abc import ABC, abstractmethod
 from collections.abc import AsyncIterator
 from dataclasses import dataclass
+from functools import wraps
+from typing import Any
 
 
 def resolve_api_key(settings: object | None, provider_name: str, env_var: str) -> str:
@@ -108,8 +110,47 @@ class ProviderClient(ABC):
     edits to the loop (see SPEC operating principle "Pluggable everywhere").
     """
 
+    # Checked after construction: class attributes, properties, and attributes
+    # assigned in __init__ are all supported, without requiring super().__init__.
     name: str
     model: str
+
+    def _validate_identity(self) -> None:
+        for field in ("name", "model"):
+            value = getattr(self, field, None)
+            if not isinstance(value, str) or not value.strip():
+                raise TypeError(f"{type(self).__name__}.{field} must be a nonempty string")
+
+    def __init__(self, *args: Any, **kwargs: Any) -> None:
+        super().__init__(*args, **kwargs)
+        if type(self).__init__ is ProviderClient.__init__:
+            self._validate_identity()
+
+    def __post_init__(self, *_init_vars: Any) -> None:
+        """Validate dataclass providers after their generated initializer runs."""
+        if type(self).__post_init__ is ProviderClient.__post_init__:
+            self._validate_identity()
+
+    def __init_subclass__(cls, **kwargs: Any) -> None:
+        """Validate completed initializers without imposing another metaclass."""
+        super().__init_subclass__(**kwargs)
+
+        def wrap_initializer(method_name: str, initializer: Any) -> Any:
+            @wraps(initializer)
+            def checked(self: ProviderClient, *args: Any, **kwargs: Any) -> None:
+                initializer(self, *args, **kwargs)
+                # Children may assign identity after super() returns. Only the
+                # outermost initializer validates, including inherited methods.
+                if getattr(type(self), method_name) is checked:
+                    self._validate_identity()
+
+            return checked
+
+        for method_name in ("__init__", "__post_init__"):
+            # Leave inherited constructors untouched: dataclass decorators need
+            # to generate __init__ when the class does not declare one itself.
+            if method_name in cls.__dict__:
+                setattr(cls, method_name, wrap_initializer(method_name, cls.__dict__[method_name]))
 
     @abstractmethod
     async def stream(
@@ -147,8 +188,27 @@ class ProviderClient(ABC):
         """Estimate the token count for ``messages`` (chars // 4, minimum 1).
 
         A deterministic, offline heuristic — not a real tokenization — shared
-        by every Phase-1 provider. Precise (async, SDK-backed) counting is
-        deferred to issue #47; an adapter that gains it overrides this method.
+        by providers unless overridden. This synchronous API stays offline;
+        use :meth:`count_tokens_async` for SDK-backed counting when supported.
         """
         chars = sum(len(str(m.content)) for m in messages)
         return max(1, chars // 4)
+
+    async def count_tokens_async(
+        self,
+        messages: list[ChatMessage],
+        *,
+        tools: list[dict] | None = None,
+        system: str | None = None,
+    ) -> int:
+        """Count input tokens, using the provider SDK when available.
+
+        The default calls the offline :meth:`count_tokens` estimator and adds
+        rough estimates for tool definitions and the system prompt. Fake and
+        OpenAI providers currently use this fallback. Providers with a counting
+        endpoint override this method and may require credentials and network
+        access; their errors propagate to the caller. Counts exclude generated
+        output and need not match the eventual response usage exactly.
+        """
+        extra_chars = len(system or "") + (len(str(tools)) if tools else 0)
+        return self.count_tokens(messages) + extra_chars // 4
