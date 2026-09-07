@@ -107,7 +107,10 @@ contract rationale). `ProviderClient.stream` is declared as an `async def` with 
 unreachable `yield ChatChunk()` so type-checkers infer `AsyncIterator` correctly; the body
 `raise NotImplementedError`. Concrete instances must expose nonempty string `name` and
 `model` values after initialization; class attributes, instance attributes, and properties
-are supported. `count_tokens_async(messages, *, tools=None, system=None)` provides an
+are supported. Constructor wrapping via `__init_subclass__` keeps the standard `ABCMeta`
+compatible with framework metaclasses, and validates only after the concrete constructor
+returns (so subclasses can assign identity after `super().__init__`). Dataclass providers
+retain generated constructors and validate through `__post_init__`. `count_tokens_async(messages, *, tools=None, system=None)` provides an
 awaitable counting seam; its default remains an offline estimate.
 
 **`fake.py` — `FakeProvider`.** The replaceability proof and the workhorse of every test.

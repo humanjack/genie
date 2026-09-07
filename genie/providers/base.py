@@ -10,9 +10,10 @@ SDK's wire format, so the agent loop never learns who is on the other end.
 from __future__ import annotations
 
 import os
-from abc import ABC, ABCMeta, abstractmethod
+from abc import ABC, abstractmethod
 from collections.abc import AsyncIterator
 from dataclasses import dataclass
+from functools import wraps
 from typing import Any
 
 
@@ -100,19 +101,7 @@ class ChatChunk:
     usage: dict | None = None
 
 
-class _ProviderMeta(ABCMeta):
-    """Validate identity after initialization, including instance attributes."""
-
-    def __call__(cls, *args: Any, **kwargs: Any) -> Any:
-        client = super().__call__(*args, **kwargs)
-        for field in ("name", "model"):
-            value = getattr(client, field, None)
-            if not isinstance(value, str) or not value.strip():
-                raise TypeError(f"{cls.__name__}.{field} must be a nonempty string")
-        return client
-
-
-class ProviderClient(ABC, metaclass=_ProviderMeta):
+class ProviderClient(ABC):
     """Abstract base every LLM provider implementation must satisfy.
 
     Concrete subclasses set :attr:`name` and :attr:`model` and translate the
@@ -125,6 +114,43 @@ class ProviderClient(ABC, metaclass=_ProviderMeta):
     # assigned in __init__ are all supported, without requiring super().__init__.
     name: str
     model: str
+
+    def _validate_identity(self) -> None:
+        for field in ("name", "model"):
+            value = getattr(self, field, None)
+            if not isinstance(value, str) or not value.strip():
+                raise TypeError(f"{type(self).__name__}.{field} must be a nonempty string")
+
+    def __init__(self, *args: Any, **kwargs: Any) -> None:
+        super().__init__(*args, **kwargs)
+        if type(self).__init__ is ProviderClient.__init__:
+            self._validate_identity()
+
+    def __post_init__(self, *_init_vars: Any) -> None:
+        """Validate dataclass providers after their generated initializer runs."""
+        if type(self).__post_init__ is ProviderClient.__post_init__:
+            self._validate_identity()
+
+    def __init_subclass__(cls, **kwargs: Any) -> None:
+        """Validate completed initializers without imposing another metaclass."""
+        super().__init_subclass__(**kwargs)
+
+        def wrap_initializer(method_name: str, initializer: Any) -> Any:
+            @wraps(initializer)
+            def checked(self: ProviderClient, *args: Any, **kwargs: Any) -> None:
+                initializer(self, *args, **kwargs)
+                # Children may assign identity after super() returns. Only the
+                # outermost initializer validates, including inherited methods.
+                if getattr(type(self), method_name) is checked:
+                    self._validate_identity()
+
+            return checked
+
+        for method_name in ("__init__", "__post_init__"):
+            # Leave inherited constructors untouched: dataclass decorators need
+            # to generate __init__ when the class does not declare one itself.
+            if method_name in cls.__dict__:
+                setattr(cls, method_name, wrap_initializer(method_name, cls.__dict__[method_name]))
 
     @abstractmethod
     async def stream(

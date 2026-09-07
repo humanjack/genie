@@ -137,3 +137,109 @@ def test_provider_accepts_property_identity_and_inheritance() -> None:
     provider = Inherited()
     assert provider.name == "property-provider"
     assert provider.model == "property-model"
+
+
+def test_provider_can_use_framework_abc_metaclass() -> None:
+    from abc import ABCMeta
+
+    from genie.providers.fake import FakeProvider
+
+    class FrameworkMeta(ABCMeta):
+        pass
+
+    class FrameworkBase(metaclass=FrameworkMeta):
+        pass
+
+    class CustomProvider(FakeProvider, FrameworkBase):
+        pass
+
+    provider = CustomProvider(model="framework-model")
+    assert isinstance(provider, FrameworkBase)
+    assert provider.name == "fake"
+    assert provider.model == "framework-model"
+    with pytest.raises(TypeError, match="model"):
+        CustomProvider(model="")
+
+
+def test_identity_validation_waits_for_concrete_constructor() -> None:
+    class Parent(ProviderClient):
+        def __init__(self) -> None:
+            self.name = "parent"
+
+        async def stream(self, *args, **kwargs) -> AsyncIterator[ChatChunk]:
+            yield ChatChunk()
+
+    class Child(Parent):
+        def __init__(self, model: str) -> None:
+            super().__init__()
+            self.model = model
+
+    class Inherited(Child):
+        pass
+
+    assert Child("late-model").model == "late-model"
+    assert Inherited("inherited-model").model == "inherited-model"
+    with pytest.raises(TypeError, match="model"):
+        Parent()
+    with pytest.raises(TypeError, match="model"):
+        Inherited("")
+
+
+def test_dataclass_provider_keeps_generated_constructor_and_validates_identity() -> None:
+    from dataclasses import dataclass
+
+    @dataclass
+    class DataProvider(ProviderClient):
+        name = "data"
+        model: str
+
+        async def stream(self, *args, **kwargs) -> AsyncIterator[ChatChunk]:
+            yield ChatChunk()
+
+    assert DataProvider("data-model").model == "data-model"
+    with pytest.raises(TypeError, match="model"):
+        DataProvider("")
+
+
+def test_dataclass_provider_can_finalize_identity_in_post_init() -> None:
+    from dataclasses import dataclass
+
+    from genie.providers.fake import FakeProvider
+
+    @dataclass
+    class DataProvider(FakeProvider):
+        model: str
+
+        def __post_init__(self) -> None:
+            self.model = self.model.strip()
+            super().__post_init__()
+            self.model = self.model or "fallback-model"
+
+    assert DataProvider("").model == "fallback-model"
+
+    @dataclass
+    class Inherited(DataProvider):
+        pass
+
+    assert Inherited("  data-model  ").model == "data-model"
+
+
+def test_provider_preserves_cooperative_framework_constructor() -> None:
+    from abc import ABCMeta
+
+    class FrameworkMeta(ABCMeta):
+        pass
+
+    class FrameworkBase(metaclass=FrameworkMeta):
+        def __init__(self, model: str) -> None:
+            self.model = model
+
+    class CustomProvider(ProviderClient, FrameworkBase):
+        name = "framework"
+
+        async def stream(self, *args, **kwargs) -> AsyncIterator[ChatChunk]:
+            yield ChatChunk()
+
+    assert CustomProvider("framework-model").model == "framework-model"
+    with pytest.raises(TypeError, match="model"):
+        CustomProvider("")
