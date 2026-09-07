@@ -325,9 +325,13 @@ async def test_malformed_arguments_are_preserved_for_validation():
 
 async def test_real_sdk_serializes_request_and_parses_sse():
     import json
+    from importlib import import_module
 
-    import httpx
-    from openai import AsyncOpenAI
+    from openai import AsyncOpenAI, DefaultAsyncHttpxClient
+
+    # Use the SDK's transport generation: OpenAI 2.x uses httpx, 3.x httpx2.
+    # Both packages can coexist, so importing whichever is installed is unsafe.
+    httpx = import_module(DefaultAsyncHttpxClient.__bases__[0].__module__.split(".")[0])
 
     requests = []
     responses = []
@@ -385,7 +389,7 @@ async def test_real_sdk_serializes_request_and_parses_sse():
         return response
 
     async with AsyncOpenAI(
-        api_key="test", http_client=httpx.AsyncClient(transport=httpx.MockTransport(handler))
+        api_key="test", http_client=DefaultAsyncHttpxClient(transport=httpx.MockTransport(handler))
     ) as sdk:
         client = OpenAIClient("gpt-4o-mini", client=sdk, api="responses")
         chunks = [
