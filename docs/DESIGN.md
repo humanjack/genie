@@ -426,5 +426,5 @@ GitHub issue, each adversarially reviewed before merge, under umbrella epic #1. 
 map and the wave/parallelism strategy are in [DEVELOPMENT_PLAN.md](./DEVELOPMENT_PLAN.md);
 the per-PR landing order and open follow-ups are in [IMPLEMENTATION.md](./IMPLEMENTATION.md) §12.
 
-**Open follow-ups (Phase 2):** #46 (config `extra='forbid'` + wrap `TOMLDecodeError`),
-#47 (provider async `count_tokens`), #49 (OpenAI Responses API mode).
+**Follow-up tracking:** #46 (strict config), #47 (provider async token counting),
+and #49 (OpenAI Responses API mode); see GitHub for current review and merge status.

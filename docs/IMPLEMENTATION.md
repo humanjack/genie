@@ -139,9 +139,14 @@ unreachable `yield ChatChunk()` so type-checkers infer `AsyncIterator` correctly
   the `ProviderClient` base default shared by every provider, and precise async counting is
   deferred (issue #47).
 
-**`openai_client.py` — `OpenAIClient`.** Chat-completions only.
-- **`responses` mode raises `NotImplementedError`** (deferred, issue #49). Mode resolves from
-  `settings.provider.openai.api`, default `"chat_completions"`.
+**`openai_client.py` — `OpenAIClient`.** Chat Completions and Responses.
+- Mode resolves from `settings.provider.openai.api`, default `"chat_completions"` for
+  compatibility. Opt-in `"responses"` uses stored server state and `previous_response_id`
+  only when the supplied history continues the last successfully consumed response.
+- Responses text, refusal, and indexed function-argument events map to `ChatChunk`;
+  completed responses include token/cache usage. Failed, incomplete, or abruptly ended
+  responses raise before the loop can dispatch partial tool calls. Streams close on
+  completion, errors, and cancellation; concurrent streams require separate clients.
 - **`_translate_tools`**: neutral `{name, description, input_schema}` → `{type:function,
   function:{name, description, parameters}}`; returns `None` for an empty list so the SDK call
   omits `tools`.
@@ -508,12 +513,10 @@ Test issues #29–#39 were closed with delivery notes (Phase-0 tests rode their 
 `Closes`; Phase-1 test issues were closed manually as delivered-in-impl-PR). Tags:
 `v0.1.0-phase0`, `v0.1.0-phase1`.
 
-**Deferred follow-ups (open, Phase 2):**
-- **#46** — config `extra='forbid'` + wrap `TOMLDecodeError` in a friendly error.
-- **#47** — provider async `count_tokens` (replace the `chars//4` estimate) + name/model
-  enforcement.
-- **#49** — OpenAI Responses API mode (`provider.openai.api = "responses"`, currently
-  `NotImplementedError`).
+**Follow-up tracking:** [#46](https://github.com/humanjack/genie/issues/46) covers
+strict configuration, [#47](https://github.com/humanjack/genie/issues/47) covers async
+token counting and provider identity, and [#49](https://github.com/humanjack/genie/issues/49)
+covers Responses support. GitHub tracks their review and merge status.
 
 **Next phase (per SPEC §Phase 2):** the policy hooks the chokepoint was built for —
 `approval`, `iteration_budget` (replacing `max_iterations`), `cost_ledger`, `policy` — plus
