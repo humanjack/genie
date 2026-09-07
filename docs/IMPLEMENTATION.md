@@ -147,6 +147,14 @@ unreachable `yield ChatChunk()` so type-checkers infer `AsyncIterator` correctly
   completed responses include token/cache usage. Failed, incomplete, or abruptly ended
   responses raise before the loop can dispatch partial tool calls. Streams close on
   completion, errors, and cancellation; concurrent streams require separate clients.
+- Optional `provider_data` on terminal chunks flows through the loop into messages
+  and JSONL transcripts. Responses requests `reasoning.encrypted_content`, preserving
+  completed output item order, IDs, and assistant phase for full-history replay after
+  resume or context pruning. Plaintext reasoning is discarded. A fingerprint binds
+  native output to the current neutral assistant text and tool calls; edits invalidate
+  native replay, preventing stale output from overriding the edited history.
+- Responses omits temperature for GPT-5 and o-series reasoning models; conventional
+  models retain sampling control. No reasoning-effort setting is currently exposed.
 - **`_translate_tools`**: neutral `{name, description, input_schema}` → `{type:function,
   function:{name, description, parameters}}`; returns `None` for an empty list so the SDK call
   omits `tools`.

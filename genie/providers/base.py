@@ -12,7 +12,7 @@ from __future__ import annotations
 import os
 from abc import ABC, abstractmethod
 from collections.abc import AsyncIterator
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 
 def resolve_api_key(settings: object | None, provider_name: str, env_var: str) -> str:
@@ -50,12 +50,16 @@ class ChatMessage:
             ``None`` when the turn made no tool calls.
         tool_call_id: For ``role == "tool"`` results, the id of the call this
             message answers; ``None`` otherwise.
+        provider_data: Optional JSON continuation metadata keyed by provider/API.
+            Persisted with history, but excluded from repr and visible content.
     """
 
     role: str
     content: str | list[dict]
     tool_calls: list[dict] | None = None
     tool_call_id: str | None = None
+    # Opaque JSON continuation metadata; never part of user-visible content.
+    provider_data: dict | None = field(default=None, repr=False)
 
 
 @dataclass
@@ -91,12 +95,15 @@ class ChatChunk:
         usage: Token accounting for the turn with keys ``input_tokens``,
             ``output_tokens``, ``cache_read``, ``cache_write``. Delivered on the
             turn's terminal chunk.
+        provider_data: Opaque JSON continuation metadata for a completed turn.
     """
 
     delta_text: str | None = None
     tool_call_delta: dict | None = None
     finish_reason: str | None = None
     usage: dict | None = None
+    # Complete continuation metadata, emitted on a successful terminal chunk.
+    provider_data: dict | None = field(default=None, repr=False)
 
 
 class ProviderClient(ABC):

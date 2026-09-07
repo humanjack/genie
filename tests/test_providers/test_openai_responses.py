@@ -61,6 +61,7 @@ async def test_text_state_and_request_options():
         temperature=0.5,
         stream=True,
         store=True,
+        include=["reasoning.encrypted_content"],
     )
     messages.extend([ChatMessage("assistant", "hello"), ChatMessage("user", "again")])
     await drain(client, messages, system="sys")
@@ -372,7 +373,22 @@ async def test_real_sdk_serializes_request_and_parses_sse():
                     "parallel_tool_calls": True,
                     "tool_choice": "auto",
                     "tools": [],
-                    "output": [],
+                    "output": [
+                        {
+                            "type": "reasoning",
+                            "id": "rs_1",
+                            "summary": [],
+                            "encrypted_content": "encrypted",
+                        },
+                        {
+                            "type": "function_call",
+                            "id": "fc_1",
+                            "call_id": "call_1",
+                            "name": "read",
+                            "arguments": '{"path":"a"}',
+                            "status": "completed",
+                        },
+                    ],
                     "usage": {
                         "input_tokens": 10,
                         "output_tokens": 2,
@@ -418,4 +434,166 @@ async def test_real_sdk_serializes_request_and_parses_sse():
         "cache_read": 3,
         "cache_write": 0,
     }
+    metadata = chunks[-1].provider_data
+    assert metadata is not None
+    assert metadata["openai.responses"]["output"][0] == {
+        "type": "reasoning",
+        "id": "rs_1",
+        "summary": [],
+        "encrypted_content": "encrypted",
+    }
+    assert metadata["openai.responses"]["output"][1]["id"] == "fc_1"
+    assert "encrypted" not in repr(chunks[-1])
     assert responses[0].is_closed
+
+
+@pytest.mark.parametrize(
+    "model",
+    [
+        "gpt-5",
+        "gpt-5-mini",
+        "gpt-5-nano-2025-08-07",
+        "gpt-5.1",
+        "gpt-5.2",
+        "o1",
+        "o3-mini",
+        "o4-mini-2025-04-16",
+    ],
+)
+async def test_reasoning_models_omit_unsupported_temperature(model):
+    sdk = SDK([completed()])
+    await drain(OpenAIClient(model, client=sdk, api="responses"), [], temperature=0.2)
+    assert "temperature" not in sdk.requests[0]
+    assert sdk.requests[0]["max_output_tokens"] == 4096
+
+
+@pytest.mark.parametrize(
+    "continuation", ["chained", "resumed", "pruned", "edited_text", "edited_tools", "edited_role"]
+)
+async def test_reasoning_survives_real_loop_and_session_resume(tmp_path, continuation):
+    from openai.types.responses import (
+        ResponseFunctionToolCall,
+        ResponseOutputMessage,
+        ResponseOutputText,
+        ResponseReasoningItem,
+    )
+
+    from genie.hooks.manager import HookManager
+    from genie.loop import run_turn
+    from genie.session.session import Session
+    from genie.tools.base import tool
+    from genie.tools.registry import ToolRegistry
+    from genie.tools.result import ToolResult
+
+    reasoning = ResponseReasoningItem.model_validate(
+        {
+            "id": "rs_1",
+            "type": "reasoning",
+            "summary": [{"type": "summary_text", "text": "internal summary"}],
+            "content": [{"type": "reasoning_text", "text": "internal reasoning"}],
+            "encrypted_content": "opaque-encrypted-state",
+        }
+    )
+    native_call = ResponseFunctionToolCall(
+        id="fc_1",
+        type="function_call",
+        call_id="call_1",
+        name="remember",
+        arguments='{"text":"hello"}',
+        status="completed",
+    )
+    native_text = ResponseOutputMessage(
+        id="msg_1",
+        type="message",
+        role="assistant",
+        status="completed",
+        content=[ResponseOutputText(type="output_text", text="checking", annotations=[])],
+    )
+    sdk = SDK(
+        [
+            event("response.output_text.delta", delta="checking"),
+            opening(2, "call_1", "remember"),
+            arguments(2, '{"text":"hello"}'),
+            completed(output=[reasoning, native_text, native_call]),
+        ],
+        [event("response.output_text.delta", delta="done"), completed("r2")],
+    )
+    provider = OpenAIClient("gpt-5-mini", client=sdk, api="responses")
+    session = Session.create(tmp_path, id="state", model="gpt-5-mini")
+    session.append(ChatMessage("user", "old context"))
+    session.append(ChatMessage("assistant", "old reply"))
+    session.append(ChatMessage("user", "remember hello"))
+    invoked = []
+
+    @tool(name="remember")
+    async def remember(text: str) -> ToolResult:
+        """Remember a value."""
+        invoked.append(text)
+        return ToolResult.text("remembered " + text)
+
+    registry = ToolRegistry()
+    registry.register_all([remember])
+    visible = []
+    await run_turn(
+        session, provider, registry, HookManager(), max_iterations=1, on_text_delta=visible.append
+    )
+    assert invoked == ["hello"]
+    assert visible == ["checking"]
+    assert sdk.requests[0]["include"] == ["reasoning.encrypted_content"]
+    resumed = Session.resume(tmp_path, "state")
+    assert resumed.messages == session.messages
+    assert resumed.messages[-2].provider_data is not None
+    assert "opaque-encrypted-state" not in repr(resumed.messages[-2])
+    assert resumed.messages[-2].content == "checking"
+    persisted = resumed.transcript.path.read_text()
+    assert "internal summary" not in persisted
+    assert "internal reasoning" not in persisted
+    if continuation == "resumed":
+        provider = OpenAIClient("gpt-5-mini", client=sdk, api="responses")
+    elif continuation == "pruned":
+        resumed.messages = resumed.messages[2:]
+    elif continuation == "edited_text":
+        resumed.messages[-2].content = "edited"
+    elif continuation == "edited_tools":
+        calls = resumed.messages[-2].tool_calls
+        assert calls is not None
+        calls[0]["arguments"] = {"text": "edited"}
+    elif continuation == "edited_role":
+        resumed.messages[-2].role = "user"
+    result = await run_turn(
+        resumed, provider, registry, HookManager(), on_text_delta=visible.append
+    )
+    assert result.stop_reason == "model_stopped"
+    assert visible == ["checking", "done"]
+    assert sdk.requests[1]["input"][-1] == {
+        "type": "function_call_output",
+        "call_id": "call_1",
+        "output": "remembered hello",
+    }
+    if continuation == "chained":
+        assert sdk.requests[1]["previous_response_id"] == "resp_1"
+        assert len(sdk.requests[1]["input"]) == 1
+    else:
+        assert "previous_response_id" not in sdk.requests[1]
+        items = sdk.requests[1]["input"]
+        reasoning_items = [item for item in items if item.get("type") == "reasoning"]
+        if continuation in ("resumed", "pruned"):
+            assert reasoning_items == [
+                {
+                    "type": "reasoning",
+                    "id": "rs_1",
+                    "summary": [],
+                    "encrypted_content": "opaque-encrypted-state",
+                }
+            ]
+            assert items[-3] == native_text.model_dump(exclude_none=True)
+            assert items[-2] == native_call.model_dump(exclude_none=True)
+        else:
+            assert reasoning_items == []
+            assert not any(item.get("id") == "msg_1" for item in items)
+            if continuation == "edited_text":
+                assert items[-3]["content"] == "edited"
+            elif continuation == "edited_tools":
+                assert items[-2]["arguments"] == '{"text": "edited"}'
+            else:
+                assert items[-3]["role"] == "user"

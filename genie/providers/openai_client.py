@@ -16,7 +16,9 @@ usage is emitted on its own terminal :class:`ChatChunk` when it lands.
 
 from __future__ import annotations
 
+import hashlib
 import json
+import re
 from collections.abc import AsyncGenerator
 from contextlib import aclosing, suppress
 from copy import deepcopy
@@ -113,10 +115,17 @@ def _response_content(content: str | list[dict]) -> str | list[dict]:
     return blocks
 
 
-def _translate_response_messages(messages: list[ChatMessage]) -> list[dict]:
+def _translate_response_messages(
+    messages: list[ChatMessage], *, use_provider_data: bool = True
+) -> list[dict]:
     """Translate history to Responses input, canonicalizing function arguments."""
     out: list[dict] = []
     for message in messages:
+        if use_provider_data and message.role == "assistant":
+            saved = (message.provider_data or {}).get("openai.responses", {})
+            if saved.get("fingerprint") == _response_fingerprint(message):
+                out.extend(deepcopy(saved["output"]))
+                continue
         if message.role == "tool":
             out.append(
                 {
@@ -144,6 +153,36 @@ def _translate_response_messages(messages: list[ChatMessage]) -> list[dict]:
                 }
             )
     return out
+
+
+def _response_fingerprint(message: ChatMessage) -> str:
+    """Bind opaque output to the editable, provider-neutral assistant message."""
+    neutral = _translate_response_messages([message], use_provider_data=False)
+    encoded = json.dumps(neutral, sort_keys=True, separators=(",", ":")).encode()
+    return hashlib.sha256(encoded).hexdigest()
+
+
+def _response_provider_data(response: Any, assistant: ChatMessage) -> dict | None:
+    """Keep completed native items for full-history replay, including encrypted reasoning.
+
+    SDK objects never leave this adapter. Plaintext reasoning is neither
+    requested nor retained; the provider's opaque encrypted content is enough
+    to continue. Preserve output order, tool item IDs, and assistant phase.
+    """
+    output = []
+    for item in getattr(response, "output", None) or []:
+        native = item.model_dump(mode="json", exclude_none=True)
+        if native["type"] == "reasoning":
+            native = {
+                key: value
+                for key, value in native.items()
+                if key in ("type", "id", "encrypted_content", "status")
+            }
+            native["summary"] = []
+        output.append(native)
+    if not output:
+        return None
+    return {"openai.responses": {"output": output, "fingerprint": _response_fingerprint(assistant)}}
 
 
 class OpenAIClient(ProviderClient):
@@ -260,10 +299,15 @@ class OpenAIClient(ProviderClient):
                 "model": self.model,
                 "input": history,
                 "max_output_tokens": max_tokens,
-                "temperature": temperature,
                 "stream": True,
                 "store": True,
+                "include": ["reasoning.encrypted_content"],
             }
+            # GPT-5 and o-series reasoning defaults reject sampling parameters.
+            # We expose no reasoning-effort override, so leave their defaults
+            # to the server; conventional models retain the requested sampling.
+            if not re.match(r"^(gpt-5(?:[.-]|$)|o\d+(?:[.-]|$))", self.model):
+                request["temperature"] = temperature
             if system is not None:
                 request["instructions"] = system
             previous = self._response_history
@@ -325,11 +369,14 @@ class OpenAIClient(ProviderClient):
                                 "cache_write": 0,
                             }
                         )
-                        yield ChatChunk(
-                            finish_reason="tool_calls" if calls else "stop", usage=accounting
-                        )
                         assistant = ChatMessage(
                             "assistant", "".join(text), list(calls.values()) or None
+                        )
+                        assistant.provider_data = _response_provider_data(event.response, assistant)
+                        yield ChatChunk(
+                            finish_reason="tool_calls" if calls else "stop",
+                            usage=accounting,
+                            provider_data=assistant.provider_data,
                         )
                         self._response_history = deepcopy(
                             history + _translate_response_messages([assistant])
