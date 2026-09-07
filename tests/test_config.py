@@ -3,8 +3,10 @@
 from __future__ import annotations
 
 from pathlib import Path
+from tomllib import TOMLDecodeError
 
 import pytest
+from pydantic import ValidationError
 
 from genie.config import (
     PROVIDER_DEFAULT_ENV,
@@ -39,6 +41,59 @@ def test_default_path_constant_is_genie_config():
     from genie.config import DEFAULT_CONFIG_PATH
 
     assert Path("~/.genie/config.toml") == DEFAULT_CONFIG_PATH
+
+
+@pytest.mark.parametrize(
+    "section, key",
+    [
+        ("", "provdier"),
+        ("provider", "defualt"),
+        ("provider.anthropic", "api_key_en"),
+        ("provider.openai", "api_key_en"),
+        ("loop", "max_iteratoins"),
+        ("tools", "bsh"),
+        ("tools.bash", "timeout_second"),
+        ("sandbox", "working_dir_onyl"),
+        ("approval", "dangerous_pattern"),
+        ("memory", "project_flie"),
+        ("skills", "dir"),
+    ],
+)
+def test_unknown_config_keys_are_rejected(tmp_path: Path, section: str, key: str):
+    """Typos fail with the full field path at every configuration level."""
+    config = tmp_path / "config.toml"
+    header = f"[{section}]\n" if section else ""
+    config.write_text(f'{header}{key} = "typo"\n')
+
+    with pytest.raises(ValidationError) as exc_info:
+        load_config(config, env={})
+
+    error = exc_info.value.errors()[0]
+    expected_path = (*section.split("."), key) if section else (key,)
+    assert error["loc"] == expected_path
+    assert error["type"] == "extra_forbidden"
+
+
+def test_unknown_config_key_is_not_hidden_by_env_override(tmp_path: Path):
+    config = tmp_path / "config.toml"
+    config.write_text('[provider]\ndefualt = "openai:gpt-4o"\n')
+
+    with pytest.raises(ValidationError, match=r"provider\.defualt"):
+        load_config(config, env={PROVIDER_DEFAULT_ENV: "openai:gpt-4o-mini"})
+
+
+def test_invalid_toml_names_expanded_config_path(tmp_path: Path, monkeypatch):
+    """Syntax errors identify the actual file and preserve the parser diagnostic."""
+    monkeypatch.setenv("HOME", str(tmp_path))
+    config = tmp_path / "broken.toml"
+    config.write_text("[provider\n")
+
+    with pytest.raises(ValueError, match="Invalid TOML") as exc_info:
+        load_config(Path("~/broken.toml"), env={})
+
+    assert str(config) in str(exc_info.value)
+    assert isinstance(exc_info.value.__cause__, TOMLDecodeError)
+    assert str(exc_info.value.__cause__) in str(exc_info.value)
 
 
 def test_partial_toml_overrides_only_specified_keys(tmp_path: Path):

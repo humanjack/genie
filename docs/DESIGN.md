@@ -144,6 +144,7 @@ class ProviderClient(ABC):
     name: str; model: str
     async def stream(messages, tools, *, max_tokens, temperature, system, cache_breakpoints) -> AsyncIterator[ChatChunk]
     def count_tokens(messages) -> int
+    async def count_tokens_async(messages, *, tools=None, system=None) -> int
 ```
 
 Messages are plain dataclasses; tool definitions are JSON-Schema `dict`s. **Each adapter
