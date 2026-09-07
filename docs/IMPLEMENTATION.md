@@ -352,7 +352,8 @@ The centerpiece. Holds no policy and no provider knowledge.
 ### 4.9 Config (`genie/config.py`)
 
 - Pydantic `Settings` aggregating `provider, loop, tools, sandbox, approval, memory, skills`
-  sections — every SPEC §13 key has a typed default.
+  sections — every SPEC §13 key has a typed default. Unknown keys are rejected at
+  every nesting level, so misspelled options cannot silently fall back to defaults.
 - **`load_config(path=None, *, env=None)`**: precedence **defaults < TOML < env**. Missing TOML
   → pure defaults (never an error). Only env override today: `GENIE_PROVIDER_DEFAULT`. `env`
   defaults to `os.environ` but is injectable for pure tests.
@@ -361,7 +362,8 @@ The centerpiece. Holds no policy and no provider knowledge.
 - **`resolve_api_key(name, env)`**: returns the key or `None` (empty string also → `None`);
   **`require_api_key(name, env)`**: raises `ValueError` naming the exact env var.
 - OpenAI `api` defaults to `"chat_completions"` so a default-configured `openai:` run succeeds.
-- TOML reading is isolated in `_read_toml` — the pluggable format seam.
+- TOML reading is isolated in `_read_toml` — the pluggable format seam. Invalid TOML
+  raises a `ValueError` naming the expanded config path, with the parser error chained.
 
 ### 4.10 Logger (`genie/utils/logger.py`)
 

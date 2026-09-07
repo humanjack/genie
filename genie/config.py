@@ -18,13 +18,19 @@ import tomllib
 from collections.abc import Mapping
 from pathlib import Path
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 
 DEFAULT_CONFIG_PATH = Path("~/.genie/config.toml")
 PROVIDER_DEFAULT_ENV = "GENIE_PROVIDER_DEFAULT"
 
 
-class ProviderProfile(BaseModel):
+class ConfigModel(BaseModel):
+    """Reject unknown fields instead of silently falling back to defaults."""
+
+    model_config = ConfigDict(extra="forbid")
+
+
+class ProviderProfile(ConfigModel):
     """Shared base for per-provider profiles; carries the API-key env var name."""
 
     api_key_env: str
@@ -49,7 +55,7 @@ class OpenAIProviderConfig(ProviderProfile):
     api: str = "chat_completions"
 
 
-class ProviderConfig(BaseModel):
+class ProviderConfig(ConfigModel):
     """Provider selection and per-provider profiles (SPEC §13 ``[provider]``)."""
 
     default: str = "anthropic:claude-sonnet-4-6"
@@ -57,34 +63,34 @@ class ProviderConfig(BaseModel):
     openai: OpenAIProviderConfig = Field(default_factory=OpenAIProviderConfig)
 
 
-class LoopConfig(BaseModel):
+class LoopConfig(ConfigModel):
     """Agent-loop limits (SPEC §13 ``[loop]``)."""
 
     max_iterations: int = 50
     compaction_threshold: float = 0.8
 
 
-class BashToolConfig(BaseModel):
+class BashToolConfig(ConfigModel):
     """Bash tool execution limits (SPEC §13 ``[tools.bash]``)."""
 
     timeout_seconds: int = 30
     max_output_bytes: int = 8192
 
 
-class ToolsConfig(BaseModel):
+class ToolsConfig(ConfigModel):
     """Tool configuration aggregate (SPEC §13 ``[tools.*]``)."""
 
     bash: BashToolConfig = Field(default_factory=BashToolConfig)
 
 
-class SandboxConfig(BaseModel):
+class SandboxConfig(ConfigModel):
     """Sandbox backend selection (SPEC §13 ``[sandbox]``)."""
 
     backend: str = "local_subprocess"
     working_dir_only: bool = True
 
 
-class ApprovalConfig(BaseModel):
+class ApprovalConfig(ConfigModel):
     """Approval policy and dangerous-command patterns (SPEC §13 ``[approval]``)."""
 
     mode: str = "ask"
@@ -93,20 +99,20 @@ class ApprovalConfig(BaseModel):
     )
 
 
-class MemoryConfig(BaseModel):
+class MemoryConfig(ConfigModel):
     """Project and user memory file locations (SPEC §13 ``[memory]``)."""
 
     project_file: str = "AGENTS.md"
     user_file: str = "~/.genie/MEMORY.md"
 
 
-class SkillsConfig(BaseModel):
+class SkillsConfig(ConfigModel):
     """Skill discovery directories (SPEC §13 ``[skills]``)."""
 
     dirs: list[str] = Field(default_factory=lambda: ["~/.genie/skills"])
 
 
-class Settings(BaseModel):
+class Settings(ConfigModel):
     """Top-level configuration aggregating every section (SPEC §13).
 
     Construct via :func:`load_config`, which layers a TOML file and environment
@@ -173,13 +179,17 @@ def _read_toml(path: Path) -> dict:
     """Read and parse a TOML config file (the pluggable source seam).
 
     Returns an empty mapping if the file does not exist, so missing config is
-    never an error. Path ``~`` is expanded before reading.
+    never an error. Path ``~`` is expanded before reading. Malformed TOML raises
+    :class:`ValueError` naming the file and preserving the parser diagnostic.
     """
     resolved = path.expanduser()
     if not resolved.is_file():
         return {}
     with resolved.open("rb") as fh:
-        return tomllib.load(fh)
+        try:
+            return tomllib.load(fh)
+        except tomllib.TOMLDecodeError as exc:
+            raise ValueError(f"Invalid TOML in {resolved}: {exc}") from exc
 
 
 def _apply_env_overrides(data: dict, env: Mapping[str, str]) -> dict:
@@ -202,7 +212,8 @@ def load_config(
     Precedence is ``defaults < TOML file < environment``. ``path`` defaults to
     ``~/.genie/config.toml``; a missing file yields pure defaults rather than an
     error. A partial TOML file overrides only the keys it specifies, leaving
-    every other default intact. ``env`` defaults to ``os.environ`` and is the
+    every other default intact. Unknown keys are rejected in every section.
+    ``env`` defaults to ``os.environ`` and is the
     only place environment overrides (``GENIE_PROVIDER_DEFAULT``) are read; pass
     an explicit mapping to keep callers pure and testable.
     """
