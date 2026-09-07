@@ -291,12 +291,6 @@ async def test_cache_breakpoints_is_noop() -> None:
     assert "cache_breakpoints" not in (fake.completions.create_kwargs or {})
 
 
-async def test_responses_api_mode_raises() -> None:
-    client = OpenAIClient(model="gpt-4o-mini", client=_FakeClient([]), api="responses")
-    with pytest.raises(NotImplementedError, match=r"provider\.openai\.api"):
-        await collect(client.stream([], []))
-
-
 def test_api_mode_resolved_from_settings() -> None:
     settings = SimpleNamespace(provider=SimpleNamespace(openai=SimpleNamespace(api="responses")))
     client = OpenAIClient(model="gpt-4o-mini", settings=settings, client=_FakeClient([]))

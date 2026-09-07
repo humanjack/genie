@@ -27,7 +27,7 @@ class Transcript:
     """An append-only JSONL reader/writer over :class:`ChatMessage` records.
 
     Each line is a JSON object with the message fields ``role``, ``content``,
-    ``tool_calls``, ``tool_call_id`` plus optional ``ts`` (caller-supplied
+    ``tool_calls``, ``tool_call_id`` plus optional ``provider_data`` and ``ts`` (caller-supplied
     timestamp) and ``usage`` (token accounting). Reconstruction round-trips: a
     message written with :meth:`append` and read back with :meth:`read` is
     equal to the original.
@@ -69,6 +69,8 @@ class Transcript:
             "tool_calls": message.tool_calls,
             "tool_call_id": message.tool_call_id,
         }
+        if message.provider_data is not None:
+            record["provider_data"] = message.provider_data
         if ts is not None:
             record["ts"] = ts
         if usage is not None:
@@ -133,4 +135,5 @@ def _record_to_message(record: dict) -> ChatMessage:
         content=record["content"],
         tool_calls=record.get("tool_calls"),
         tool_call_id=record.get("tool_call_id"),
+        provider_data=record.get("provider_data"),
     )

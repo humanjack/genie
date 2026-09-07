@@ -22,6 +22,27 @@ export ANTHROPIC_API_KEY=...
 .venv/bin/genie chat-once "Hello" --model anthropic:claude-sonnet-4-6
 ```
 
+## OpenAI API mode
+
+Chat Completions remains the default. To use Responses, configure
+`~/.genie/config.toml`:
+
+```toml
+[provider.openai]
+api = "responses"
+```
+
+Responses requests use `store=true` and reuse `previous_response_id` for matching
+conversation continuations. Edited or reset history is sent in full; failed or
+interrupted streams do not advance the saved response state. State is local to
+the provider instance, so resumed processes send the complete transcript.
+Completed Responses output, including encrypted reasoning, is saved as opaque
+transcript metadata so resumed tool conversations retain their reasoning context.
+Editing an assistant message or its tool calls discards that message's saved
+native output and reasoning; the edited content is sent instead.
+Responses omits `temperature` for GPT-5 and o-series models to preserve their
+supported reasoning defaults; other models retain the requested temperature.
+
 ## Engineering rules
 
 1. Every subsystem reached only through its abstract base.

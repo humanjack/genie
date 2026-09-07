@@ -111,6 +111,7 @@ async def _collect_assistant_turn(
     # Ordered by first appearance of each slot index.
     slots: dict[int, dict] = {}
     usage: dict | None = None
+    provider_data: dict | None = None
 
     async for chunk in provider.stream(messages, tools, max_tokens=max_tokens, system=system):
         if chunk.delta_text:
@@ -121,6 +122,8 @@ async def _collect_assistant_turn(
             _accumulate_tool_delta(slots, chunk.tool_call_delta)
         if chunk.usage is not None:
             usage = chunk.usage
+        if chunk.provider_data is not None:
+            provider_data = chunk.provider_data
 
     tool_calls = [_finalize_tool_call(slot) for slot in slots.values()]
     text = "".join(text_parts)
@@ -128,6 +131,7 @@ async def _collect_assistant_turn(
         role="assistant",
         content=text,
         tool_calls=[{"id": c.id, "name": c.name, "arguments": c.args} for c in tool_calls] or None,
+        provider_data=provider_data,
     )
     return message, tool_calls, usage
 
