@@ -75,7 +75,9 @@ class FakeProvider(ProviderClient):
         Args:
             turns: Either a list of turns (each a ``list[ChatChunk]``) or a
                 flat ``list[ChatChunk]`` treated as a single turn. ``None`` is
-                an empty script.
+                an empty script, as is ``[]`` (zero turns). Use ``[[]]`` to
+                script one empty turn: its first stream yields no chunks and
+                subsequent calls raise ``IndexError``.
             model: The model identifier reported by this provider.
         """
         self.model = model

@@ -10,9 +10,10 @@ SDK's wire format, so the agent loop never learns who is on the other end.
 from __future__ import annotations
 
 import os
-from abc import ABC, abstractmethod
+from abc import ABC, ABCMeta, abstractmethod
 from collections.abc import AsyncIterator
 from dataclasses import dataclass
+from typing import Any
 
 
 def resolve_api_key(settings: object | None, provider_name: str, env_var: str) -> str:
@@ -99,7 +100,19 @@ class ChatChunk:
     usage: dict | None = None
 
 
-class ProviderClient(ABC):
+class _ProviderMeta(ABCMeta):
+    """Validate identity after initialization, including instance attributes."""
+
+    def __call__(cls, *args: Any, **kwargs: Any) -> Any:
+        client = super().__call__(*args, **kwargs)
+        for field in ("name", "model"):
+            value = getattr(client, field, None)
+            if not isinstance(value, str) or not value.strip():
+                raise TypeError(f"{cls.__name__}.{field} must be a nonempty string")
+        return client
+
+
+class ProviderClient(ABC, metaclass=_ProviderMeta):
     """Abstract base every LLM provider implementation must satisfy.
 
     Concrete subclasses set :attr:`name` and :attr:`model` and translate the
@@ -108,6 +121,8 @@ class ProviderClient(ABC):
     edits to the loop (see SPEC operating principle "Pluggable everywhere").
     """
 
+    # Checked after construction: class attributes, properties, and attributes
+    # assigned in __init__ are all supported, without requiring super().__init__.
     name: str
     model: str
 
@@ -147,8 +162,27 @@ class ProviderClient(ABC):
         """Estimate the token count for ``messages`` (chars // 4, minimum 1).
 
         A deterministic, offline heuristic — not a real tokenization — shared
-        by every Phase-1 provider. Precise (async, SDK-backed) counting is
-        deferred to issue #47; an adapter that gains it overrides this method.
+        by providers unless overridden. This synchronous API stays offline;
+        use :meth:`count_tokens_async` for SDK-backed counting when supported.
         """
         chars = sum(len(str(m.content)) for m in messages)
         return max(1, chars // 4)
+
+    async def count_tokens_async(
+        self,
+        messages: list[ChatMessage],
+        *,
+        tools: list[dict] | None = None,
+        system: str | None = None,
+    ) -> int:
+        """Count input tokens, using the provider SDK when available.
+
+        The default calls the offline :meth:`count_tokens` estimator and adds
+        rough estimates for tool definitions and the system prompt. Fake and
+        OpenAI providers currently use this fallback. Providers with a counting
+        endpoint override this method and may require credentials and network
+        access; their errors propagate to the caller. Counts exclude generated
+        output and need not match the eventual response usage exactly.
+        """
+        extra_chars = len(system or "") + (len(str(tools)) if tools else 0)
+        return self.count_tokens(messages) + extra_chars // 4

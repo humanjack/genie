@@ -155,3 +155,24 @@ def test_custom_model() -> None:
 def test_none_script_is_empty() -> None:
     provider = FakeProvider(None)
     assert provider._turns == []
+
+
+@pytest.mark.parametrize("turns", [None, []])
+async def test_empty_script_has_no_turns(turns) -> None:
+    with pytest.raises(IndexError, match="0 scripted turn"):
+        await collect(FakeProvider(turns).stream([], []))
+
+
+async def test_nested_empty_script_has_one_empty_turn() -> None:
+    provider = FakeProvider([[]])
+    assert await collect(provider.stream([], [])) == []
+    with pytest.raises(IndexError, match="1 scripted turn"):
+        await collect(provider.stream([], []))
+
+
+async def test_async_count_is_offline_and_does_not_consume_script() -> None:
+    provider = FakeProvider.from_text("still available")
+    messages = [ChatMessage(role="user", content="abcdefghijklmnop")]
+    assert await provider.count_tokens_async(messages) == provider.count_tokens(messages)
+    assert provider.calls == []
+    assert (await collect(provider.stream([], [])))[-1].finish_reason == "stop"

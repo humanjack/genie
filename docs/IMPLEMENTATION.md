@@ -105,7 +105,10 @@ make all          # lint + typecheck + cov  (the pre-merge gate)
 **`base.py` — the contract.** Two dataclasses and one ABC (see DESIGN §5.1–5.2 for the
 contract rationale). `ProviderClient.stream` is declared as an `async def` with a trailing
 unreachable `yield ChatChunk()` so type-checkers infer `AsyncIterator` correctly; the body
-`raise NotImplementedError`. Subclasses set class attributes `name` and `model`.
+`raise NotImplementedError`. Concrete instances must expose nonempty string `name` and
+`model` values after initialization; class attributes, instance attributes, and properties
+are supported. `count_tokens_async(messages, *, tools=None, system=None)` provides an
+awaitable counting seam; its default remains an offline estimate.
 
 **`fake.py` — `FakeProvider`.** The replaceability proof and the workhorse of every test.
 - Construct with `turns` as either a **list of turns** (`list[list[ChatChunk]]`, multi-turn) or
@@ -136,8 +139,9 @@ unreachable `yield ChatChunk()` so type-checkers infer `AsyncIterator` correctly
   `input_json_delta.partial_json → arguments_delta`; the terminal `message_delta` yields
   `finish_reason` + assembled `usage`.
 - `count_tokens` is a `chars // 4` estimate (min 1) — deliberately offline; the heuristic is
-  the `ProviderClient` base default shared by every provider, and precise async counting is
-  deferred (issue #47).
+  the `ProviderClient` base default shared by every provider. `count_tokens_async` awaits
+  Anthropic’s counting endpoint with translated messages and optional tools/system prompt;
+  credentials resolve lazily and SDK errors propagate.
 
 **`openai_client.py` — `OpenAIClient`.** Chat-completions only.
 - **`responses` mode raises `NotImplementedError`** (deferred, issue #49). Mode resolves from

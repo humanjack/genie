@@ -69,3 +69,71 @@ def test_chat_chunk_fields_set() -> None:
     assert chunk.delta_text == "x"
     assert chunk.finish_reason == "stop"
     assert chunk.usage == usage
+
+
+@pytest.mark.parametrize("field", ["name", "model"])
+@pytest.mark.parametrize("value", [None, "", "   ", 123])
+def test_provider_rejects_invalid_identity(field, value) -> None:
+    from genie.providers.fake import FakeProvider
+
+    class Invalid(FakeProvider):
+        def __init__(self) -> None:
+            super().__init__()
+            setattr(self, field, value)
+
+    with pytest.raises(TypeError, match=field):
+        Invalid()
+
+
+@pytest.mark.parametrize("field", ["name", "model"])
+def test_provider_rejects_missing_identity(field) -> None:
+    class Missing(ProviderClient):
+        async def stream(self, *args, **kwargs) -> AsyncIterator[ChatChunk]:
+            yield ChatChunk()
+
+    setattr(Missing, "model" if field == "name" else "name", "provided")
+    with pytest.raises(TypeError, match=field):
+        Missing()
+
+
+async def test_async_count_preserves_custom_sync_estimator() -> None:
+    from genie.providers.fake import FakeProvider
+
+    class Custom(FakeProvider):
+        def count_tokens(self, messages) -> int:
+            return 42
+
+    assert await Custom().count_tokens_async([]) == 42
+
+
+async def test_async_estimate_includes_prompt_and_tools() -> None:
+    from genie.providers.fake import FakeProvider
+
+    provider = FakeProvider()
+    tools = [{"name": "read", "input_schema": {"type": "object"}}]
+    system = "A long system prompt"
+    assert await provider.count_tokens_async([], tools=tools, system=system) == (
+        provider.count_tokens([]) + (len(str(tools)) + len(system)) // 4
+    )
+    assert await provider.count_tokens_async([], tools=[], system="") == 1
+
+
+def test_provider_accepts_property_identity_and_inheritance() -> None:
+    class Properties(ProviderClient):
+        @property
+        def name(self) -> str:
+            return "property-provider"
+
+        @property
+        def model(self) -> str:
+            return "property-model"
+
+        async def stream(self, *args, **kwargs) -> AsyncIterator[ChatChunk]:
+            yield ChatChunk()
+
+    class Inherited(Properties):
+        pass
+
+    provider = Inherited()
+    assert provider.name == "property-provider"
+    assert provider.model == "property-model"

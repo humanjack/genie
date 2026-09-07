@@ -13,6 +13,7 @@ import json
 import os
 from collections.abc import AsyncIterator
 from types import SimpleNamespace
+from unittest.mock import AsyncMock
 
 import pytest
 
@@ -102,6 +103,7 @@ class FakeMessages:
     def __init__(self, events: list[SimpleNamespace]) -> None:
         self._events = events
         self.captured_params: dict | None = None
+        self.count_tokens = AsyncMock()
 
     def stream(self, **params) -> FakeStream:
         self.captured_params = params
@@ -394,3 +396,80 @@ async def test_live_anthropic() -> None:
         )
     )
     assert chunks[-1].finish_reason is not None
+
+
+async def test_async_count_uses_sdk_translation_and_returns_input_tokens() -> None:
+    sdk = FakeClient([])
+    counter = AsyncMock(return_value=SimpleNamespace(input_tokens=123))
+    sdk.messages.count_tokens = counter
+    client = AnthropicClient(model="count-model", client=sdk)
+    messages = [
+        ChatMessage(
+            role="assistant",
+            content="",
+            tool_calls=[{"id": "call-1", "name": "read", "arguments": {"path": "a.py"}}],
+        ),
+        ChatMessage(role="tool", content="file", tool_call_id="call-1"),
+    ]
+    assert await client.count_tokens_async(messages) == 123
+    counter.assert_awaited_once_with(
+        model="count-model",
+        messages=[
+            {
+                "role": "assistant",
+                "content": [
+                    {"type": "tool_use", "id": "call-1", "name": "read", "input": {"path": "a.py"}}
+                ],
+            },
+            {
+                "role": "user",
+                "content": [{"type": "tool_result", "tool_use_id": "call-1", "content": "file"}],
+            },
+        ],
+    )
+    assert sdk.messages.captured_params is None
+
+
+async def test_async_count_requires_key_on_first_use(monkeypatch) -> None:
+    monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
+    client = AnthropicClient(model="count-model")
+    assert client.count_tokens([]) == 1
+    with pytest.raises(ValueError, match="ANTHROPIC_API_KEY"):
+        await client.count_tokens_async([])
+
+
+async def test_async_count_propagates_sdk_failure() -> None:
+    sdk = FakeClient([])
+    sdk.messages.count_tokens = AsyncMock(side_effect=RuntimeError("count unavailable"))
+    with pytest.raises(RuntimeError, match="count unavailable"):
+        await AnthropicClient(model="count-model", client=sdk).count_tokens_async([])
+
+
+async def test_async_count_with_real_sdk_and_offline_transport() -> None:
+    import httpx
+    from anthropic import AsyncAnthropic
+
+    requests: list[httpx.Request] = []
+
+    async def handler(request: httpx.Request) -> httpx.Response:
+        requests.append(request)
+        return httpx.Response(200, json={"input_tokens": 67})
+
+    tools = [{"name": "read", "input_schema": {"type": "object"}}]
+    async with AsyncAnthropic(
+        api_key="test-key",
+        http_client=httpx.AsyncClient(transport=httpx.MockTransport(handler)),
+    ) as sdk:
+        client = AnthropicClient(model="claude-sonnet-4-6", client=sdk)
+        result = await client.count_tokens_async(
+            [ChatMessage(role="user", content="hello")], tools=tools, system="be terse"
+        )
+    assert result == 67
+    assert len(requests) == 1
+    assert requests[0].url.path == "/v1/messages/count_tokens"
+    assert json.loads(requests[0].content) == {
+        "model": "claude-sonnet-4-6",
+        "messages": [{"role": "user", "content": "hello"}],
+        "tools": tools,
+        "system": "be terse",
+    }
